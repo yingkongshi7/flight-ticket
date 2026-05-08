@@ -33,7 +33,46 @@ GitHub Actions:
 1. 进入仓库 `Settings`。
 2. 打开 `Secrets and variables` -> `Actions`。
 3. 新增 secret：`SMTP_PASSWORD`。
-4. 如需持久化 `flight_price_state.json`，建议把 state 提交到私有仓库，或改用 artifact/cache/外部存储。
+4. 如需真实价格查询，新增 Amadeus secrets：`AMADEUS_CLIENT_ID` 和 `AMADEUS_CLIENT_SECRET`。
+5. 如需持久化 `flight_price_state.json`，建议把 state 提交到私有仓库，或改用 artifact/cache/外部存储。
+
+## Amadeus 真实价格源
+
+`flight_price_config.yaml` 默认启用 `amadeus` API source，并限制每次最多 50 个请求：
+
+```yaml
+sources:
+  amadeus:
+    enabled: true
+    mode: "api"
+    environment: "test"
+    client_id_env: AMADEUS_CLIENT_ID
+    client_secret_env: AMADEUS_CLIENT_SECRET
+    max_requests_per_run: 50
+```
+
+需要在 [Amadeus for Developers](https://developers.amadeus.com/) 创建 app，然后把 API Key / API Secret 放入 GitHub Actions Secrets：
+
+- `AMADEUS_CLIENT_ID`
+- `AMADEUS_CLIENT_SECRET`
+
+本地测试：
+
+```bash
+export AMADEUS_CLIENT_ID="your_api_key"
+export AMADEUS_CLIENT_SECRET="your_api_secret"
+python flight_price_monitor.py --config flight_price_config.yaml --core-only
+```
+
+Windows PowerShell：
+
+```powershell
+$env:AMADEUS_CLIENT_ID="your_api_key"
+$env:AMADEUS_CLIENT_SECRET="your_api_secret"
+python flight_price_monitor.py --config flight_price_config.yaml --core-only
+```
+
+注意：Amadeus Self-Service 的 Flight Offers Search 不覆盖所有航空公司和低成本航司，测试环境数据也可能不完整。查不到价格时脚本会保留人工确认链接。
 
 ## Cron 示例
 

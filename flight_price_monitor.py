@@ -25,12 +25,15 @@ from typing import Any
 from urllib.parse import quote, urlencode
 
 import yaml
+import requests
 
 
 STATE_FILE = "flight_price_state.json"
 FORBIDDEN_ORIGINS = {"OSA", "KIX", "ITM", "UKB"}
 ALLOWED_TOKYO_ORIGINS = {"TYO", "HND", "NRT"}
 MANUAL_ONLY_SOURCES = {"google_flights", "skyscanner", "trip_com", "ctrip", "fliggy", "airline_official"}
+AMADEUS_TOKEN_CACHE: dict[str, Any] = {}
+AMADEUS_REQUEST_COUNT = 0
 WEEKLY_GROUPS = [
     ("核心路线：东京-西安", ["Core China"]),
     ("中国大陆/港澳台低价", ["China / HK / Taiwan"]),
@@ -333,10 +336,137 @@ def build_source_links(c: SearchCandidate, config: dict[str, Any]) -> list[Sourc
         source_cfg = sources.get(name, {})
         if source_cfg.get("enabled", True):
             results.append(SourceResult(candidate=c, source_name=name, query_link=builder(c)))
+    if (sources.get("amadeus", {}) or {}).get("enabled", False):
+        results.append(SourceResult(candidate=c, source_name="amadeus", query_link=build_amadeus_api_link(c, config)))
     if (sources.get("airline_official", {}) or {}).get("enabled", True):
         for airline, link in build_airline_links(c).items():
             results.append(SourceResult(candidate=c, source_name=f"airline_official:{airline}", query_link=link))
     return results
+
+
+def amadeus_base_url(config: dict[str, Any]) -> str:
+    source_cfg = (config.get("sources") or {}).get("amadeus", {})
+    environment = source_cfg.get("environment", "test")
+    if environment == "production":
+        return "https://api.amadeus.com"
+    return "https://test.api.amadeus.com"
+
+
+def build_amadeus_api_link(c: SearchCandidate, config: dict[str, Any]) -> str:
+    params = {
+        "originLocationCode": c.origin,
+        "destinationLocationCode": c.destination,
+        "departureDate": c.depart_date,
+        "adults": "1",
+        "currencyCode": "JPY",
+        "max": "1",
+    }
+    if c.return_date:
+        params["returnDate"] = c.return_date
+    return f"{amadeus_base_url(config)}/v2/shopping/flight-offers?" + urlencode(params)
+
+
+def get_amadeus_token(config: dict[str, Any]) -> str | None:
+    source_cfg = (config.get("sources") or {}).get("amadeus", {})
+    client_id = os.environ.get(source_cfg.get("client_id_env", "AMADEUS_CLIENT_ID"))
+    client_secret = os.environ.get(source_cfg.get("client_secret_env", "AMADEUS_CLIENT_SECRET"))
+    if not client_id or not client_secret:
+        logging.info("Amadeus credentials are not configured; skipping API price fetch.")
+        return None
+
+    now = dt.datetime.now(dt.timezone.utc).timestamp()
+    if AMADEUS_TOKEN_CACHE.get("token") and AMADEUS_TOKEN_CACHE.get("expires_at", 0) > now + 60:
+        return str(AMADEUS_TOKEN_CACHE["token"])
+
+    response = requests.post(
+        f"{amadeus_base_url(config)}/v1/security/oauth2/token",
+        data={
+            "grant_type": "client_credentials",
+            "client_id": client_id,
+            "client_secret": client_secret,
+        },
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        timeout=20,
+    )
+    if response.status_code >= 400:
+        logging.warning("Amadeus token request failed: HTTP %s %s", response.status_code, response.text[:300])
+        return None
+    payload = response.json()
+    token = payload.get("access_token")
+    if not token:
+        logging.warning("Amadeus token response did not include access_token.")
+        return None
+    AMADEUS_TOKEN_CACHE["token"] = token
+    AMADEUS_TOKEN_CACHE["expires_at"] = now + int(payload.get("expires_in", 0))
+    return str(token)
+
+
+def fetch_amadeus_price(result: SourceResult, config: dict[str, Any]) -> SourceResult:
+    global AMADEUS_REQUEST_COUNT
+    source_cfg = (config.get("sources") or {}).get("amadeus", {})
+    max_requests = int(source_cfg.get("max_requests_per_run", 50))
+    if AMADEUS_REQUEST_COUNT >= max_requests:
+        result.status = "skipped"
+        result.message = f"Amadeus max_requests_per_run reached ({max_requests})"
+        return result
+
+    token = get_amadeus_token(config)
+    if not token:
+        result.status = "skipped"
+        result.message = "Amadeus credentials missing or token request failed"
+        return result
+
+    params = {
+        "originLocationCode": result.candidate.origin,
+        "destinationLocationCode": result.candidate.destination,
+        "departureDate": result.candidate.depart_date,
+        "adults": "1",
+        "currencyCode": "JPY",
+        "max": str(source_cfg.get("offers_limit", 3)),
+    }
+    if result.candidate.return_date:
+        params["returnDate"] = result.candidate.return_date
+
+    AMADEUS_REQUEST_COUNT += 1
+    try:
+        response = requests.get(
+            f"{amadeus_base_url(config)}/v2/shopping/flight-offers",
+            params=params,
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=30,
+        )
+    except requests.RequestException as exc:
+        result.status = "failed"
+        result.message = f"Amadeus request failed: {exc}"
+        return result
+
+    if response.status_code == 429:
+        result.status = "rate_limited"
+        result.message = "Amadeus rate limit reached"
+        return result
+    if response.status_code >= 400:
+        result.status = "failed"
+        result.message = f"Amadeus HTTP {response.status_code}: {response.text[:300]}"
+        return result
+
+    payload = response.json()
+    offers = payload.get("data") or []
+    prices: list[int] = []
+    for offer in offers:
+        total = (offer.get("price") or {}).get("grandTotal") or (offer.get("price") or {}).get("total")
+        try:
+            prices.append(int(round(float(total))))
+        except (TypeError, ValueError):
+            continue
+    if not prices:
+        result.status = "no_price"
+        result.message = "Amadeus returned no priced offers"
+        return result
+
+    result.price_jpy = min(prices)
+    result.status = "success"
+    result.message = "Amadeus Flight Offers Search returned a price"
+    return result
 
 
 def fetch_price_optional(result: SourceResult, config: dict[str, Any], link_only: bool = False) -> SourceResult:
@@ -346,6 +476,8 @@ def fetch_price_optional(result: SourceResult, config: dict[str, Any], link_only
     this with a legal API adapter or a very conservative Playwright adapter that
     exits on login, CAPTCHA, or bot checks.
     """
+    if result.source_name == "amadeus" and not link_only:
+        return fetch_amadeus_price(result, config)
     source_cfg = (config.get("sources") or {}).get(result.source_name.split(":")[0], {})
     if link_only or source_cfg.get("mode", "link_only") == "link_only":
         return result

@@ -2,12 +2,12 @@ smtp:
   host: smtp.gmail.com
   port: 587
   use_tls: true
-  username: "hailuwang71@gmail.com"
+  username: "your_email@gmail.com"
 
 email:
-  from: "yhailuwang71@gmail.com"
+  from: "your_email@gmail.com"
   to:
-    - "hailuwang71@gmail.com"
+    - "your_email@gmail.com"
   password_env: SMTP_PASSWORD
 
 settings:
@@ -167,6 +167,14 @@ date_windows:
     candidate_trips: []
 
 sources:
+  amadeus:
+    enabled: true
+    mode: "api"
+    environment: "test"
+    client_id_env: AMADEUS_CLIENT_ID
+    client_secret_env: AMADEUS_CLIENT_SECRET
+    max_requests_per_run: 50
+    offers_limit: 3
   google_flights:
     enabled: true
     mode: "link_only"
