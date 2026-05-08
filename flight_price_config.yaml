@@ -1,0 +1,191 @@
+smtp:
+  host: smtp.gmail.com
+  port: 587
+  use_tls: true
+  username: "your_email@gmail.com"
+
+email:
+  from: "your_email@gmail.com"
+  to:
+    - "your_email@gmail.com"
+  password_env: SMTP_PASSWORD
+
+settings:
+  currency: JPY
+  dedup_days: 7
+  price_drop_alert_pct: 15
+  significant_drop_repeat_pct: 10
+  abnormal_discount_pct: 20
+  user_agent: "Mozilla/5.0 FlightPriceMonitor/1.0"
+  dry_run_default: false
+
+core_routes:
+  - name: "Tokyo-Xian"
+    destination_category: "Core China"
+    origin_codes: ["TYO", "HND", "NRT"]
+    destination_codes: ["XIY"]
+    trip_type: "roundtrip"
+    normal_threshold_jpy: 40000
+    golden_week_threshold_jpy: 70000
+    year_end_threshold_jpy: 70000
+    spring_festival_threshold_jpy: 70000
+
+domestic_routes:
+  - {name: "Tokyo-Sapporo", destination_category: "Domestic Japan", origin_codes: ["TYO", "HND", "NRT"], destination_codes: ["CTS"], trip_type: "oneway", threshold_jpy: 8000}
+  - {name: "Tokyo-Okinawa", destination_category: "Domestic Japan", origin_codes: ["TYO", "HND", "NRT"], destination_codes: ["OKA"], trip_type: "oneway", threshold_jpy: 10000}
+  - {name: "Tokyo-Fukuoka", destination_category: "Domestic Japan", origin_codes: ["TYO", "HND", "NRT"], destination_codes: ["FUK"], trip_type: "oneway", threshold_jpy: 8000}
+  - {name: "Tokyo-Kumamoto", destination_category: "Domestic Japan", origin_codes: ["TYO", "HND", "NRT"], destination_codes: ["KMJ"], trip_type: "oneway", threshold_jpy: 10000}
+  - {name: "Tokyo-Kagoshima", destination_category: "Domestic Japan", origin_codes: ["TYO", "HND", "NRT"], destination_codes: ["KOJ"], trip_type: "oneway", threshold_jpy: 10000}
+  - {name: "Tokyo-Nagasaki", destination_category: "Domestic Japan", origin_codes: ["TYO", "HND", "NRT"], destination_codes: ["NGS"], trip_type: "oneway", threshold_jpy: 10000}
+  - {name: "Tokyo-Miyazaki", destination_category: "Domestic Japan", origin_codes: ["TYO", "HND", "NRT"], destination_codes: ["KMI"], trip_type: "oneway", threshold_jpy: 10000}
+  - {name: "Tokyo-Oita", destination_category: "Domestic Japan", origin_codes: ["TYO", "HND", "NRT"], destination_codes: ["OIT"], trip_type: "oneway", threshold_jpy: 10000}
+  - {name: "Tokyo-Kitakyushu", destination_category: "Domestic Japan", origin_codes: ["TYO", "HND", "NRT"], destination_codes: ["KKJ"], trip_type: "oneway", threshold_jpy: 10000}
+  - {name: "Tokyo-Ishigaki", destination_category: "Domestic Japan", origin_codes: ["TYO", "HND", "NRT"], destination_codes: ["ISG"], trip_type: "oneway", threshold_jpy: 15000}
+  - {name: "Tokyo-Miyakojima", destination_category: "Domestic Japan", origin_codes: ["TYO", "HND", "NRT"], destination_codes: ["MMY"], trip_type: "oneway", threshold_jpy: 15000}
+  - {name: "Tokyo-Amami", destination_category: "Domestic Japan", origin_codes: ["TYO", "HND", "NRT"], destination_codes: ["ASJ"], trip_type: "oneway", threshold_jpy: 15000}
+
+global_routes:
+  - {name: "Tokyo-Seoul", destination_category: "Northeast Asia", origin_codes: ["TYO"], destination_codes: ["ICN", "GMP"], trip_type: "roundtrip", threshold_jpy: 20000}
+  - {name: "Tokyo-Busan", destination_category: "Northeast Asia", origin_codes: ["TYO"], destination_codes: ["PUS"], trip_type: "roundtrip", threshold_jpy: 20000}
+  - {name: "Tokyo-Jeju", destination_category: "Northeast Asia", origin_codes: ["TYO"], destination_codes: ["CJU"], trip_type: "roundtrip", threshold_jpy: 25000}
+  - {name: "Tokyo-Ulaanbaatar", destination_category: "Northeast Asia", origin_codes: ["TYO"], destination_codes: ["UBN"], trip_type: "roundtrip", threshold_jpy: 60000}
+
+  - {name: "Tokyo-Xian", destination_category: "China / HK / Taiwan", origin_codes: ["TYO"], destination_codes: ["XIY"], trip_type: "roundtrip", threshold_jpy: 40000}
+  - {name: "Tokyo-Shanghai", destination_category: "China / HK / Taiwan", origin_codes: ["TYO"], destination_codes: ["PVG", "SHA"], trip_type: "roundtrip", threshold_jpy: 35000}
+  - {name: "Tokyo-Beijing", destination_category: "China / HK / Taiwan", origin_codes: ["TYO"], destination_codes: ["PEK", "PKX"], trip_type: "roundtrip", threshold_jpy: 35000}
+  - {name: "Tokyo-Dalian", destination_category: "China / HK / Taiwan", origin_codes: ["TYO"], destination_codes: ["DLC"], trip_type: "roundtrip", threshold_jpy: 35000}
+  - {name: "Tokyo-Qingdao", destination_category: "China / HK / Taiwan", origin_codes: ["TYO"], destination_codes: ["TAO"], trip_type: "roundtrip", threshold_jpy: 35000}
+  - {name: "Tokyo-Nanjing", destination_category: "China / HK / Taiwan", origin_codes: ["TYO"], destination_codes: ["NKG"], trip_type: "roundtrip", threshold_jpy: 40000}
+  - {name: "Tokyo-Hangzhou", destination_category: "China / HK / Taiwan", origin_codes: ["TYO"], destination_codes: ["HGH"], trip_type: "roundtrip", threshold_jpy: 40000}
+  - {name: "Tokyo-Guangzhou", destination_category: "China / HK / Taiwan", origin_codes: ["TYO"], destination_codes: ["CAN"], trip_type: "roundtrip", threshold_jpy: 45000}
+  - {name: "Tokyo-Shenzhen", destination_category: "China / HK / Taiwan", origin_codes: ["TYO"], destination_codes: ["SZX"], trip_type: "roundtrip", threshold_jpy: 45000}
+  - {name: "Tokyo-Chengdu", destination_category: "China / HK / Taiwan", origin_codes: ["TYO"], destination_codes: ["TFU", "CTU"], trip_type: "roundtrip", threshold_jpy: 45000}
+  - {name: "Tokyo-Chongqing", destination_category: "China / HK / Taiwan", origin_codes: ["TYO"], destination_codes: ["CKG"], trip_type: "roundtrip", threshold_jpy: 45000}
+  - {name: "Tokyo-Xiamen", destination_category: "China / HK / Taiwan", origin_codes: ["TYO"], destination_codes: ["XMN"], trip_type: "roundtrip", threshold_jpy: 45000}
+  - {name: "Tokyo-Fuzhou", destination_category: "China / HK / Taiwan", origin_codes: ["TYO"], destination_codes: ["FOC"], trip_type: "roundtrip", threshold_jpy: 45000}
+  - {name: "Tokyo-Wuhan", destination_category: "China / HK / Taiwan", origin_codes: ["TYO"], destination_codes: ["WUH"], trip_type: "roundtrip", threshold_jpy: 45000}
+  - {name: "Tokyo-HongKong", destination_category: "China / HK / Taiwan", origin_codes: ["TYO"], destination_codes: ["HKG"], trip_type: "roundtrip", threshold_jpy: 30000}
+  - {name: "Tokyo-Macau", destination_category: "China / HK / Taiwan", origin_codes: ["TYO"], destination_codes: ["MFM"], trip_type: "roundtrip", threshold_jpy: 30000}
+  - {name: "Tokyo-Taipei", destination_category: "China / HK / Taiwan", origin_codes: ["TYO"], destination_codes: ["TPE", "TSA"], trip_type: "roundtrip", threshold_jpy: 30000}
+  - {name: "Tokyo-Kaohsiung", destination_category: "China / HK / Taiwan", origin_codes: ["TYO"], destination_codes: ["KHH"], trip_type: "roundtrip", threshold_jpy: 30000}
+
+  - {name: "Tokyo-Bangkok", destination_category: "Southeast Asia", origin_codes: ["TYO"], destination_codes: ["BKK", "DMK"], trip_type: "roundtrip", threshold_jpy: 40000}
+  - {name: "Tokyo-Singapore", destination_category: "Southeast Asia", origin_codes: ["TYO"], destination_codes: ["SIN"], trip_type: "roundtrip", threshold_jpy: 45000}
+  - {name: "Tokyo-KualaLumpur", destination_category: "Southeast Asia", origin_codes: ["TYO"], destination_codes: ["KUL"], trip_type: "roundtrip", threshold_jpy: 45000}
+  - {name: "Tokyo-Manila", destination_category: "Southeast Asia", origin_codes: ["TYO"], destination_codes: ["MNL"], trip_type: "roundtrip", threshold_jpy: 40000}
+  - {name: "Tokyo-Cebu", destination_category: "Southeast Asia", origin_codes: ["TYO"], destination_codes: ["CEB"], trip_type: "roundtrip", threshold_jpy: 45000}
+  - {name: "Tokyo-Hanoi", destination_category: "Southeast Asia", origin_codes: ["TYO"], destination_codes: ["HAN"], trip_type: "roundtrip", threshold_jpy: 40000}
+  - {name: "Tokyo-HoChiMinh", destination_category: "Southeast Asia", origin_codes: ["TYO"], destination_codes: ["SGN"], trip_type: "roundtrip", threshold_jpy: 40000}
+  - {name: "Tokyo-DaNang", destination_category: "Southeast Asia", origin_codes: ["TYO"], destination_codes: ["DAD"], trip_type: "roundtrip", threshold_jpy: 45000}
+  - {name: "Tokyo-Jakarta", destination_category: "Southeast Asia", origin_codes: ["TYO"], destination_codes: ["CGK"], trip_type: "roundtrip", threshold_jpy: 50000}
+  - {name: "Tokyo-Bali", destination_category: "Southeast Asia", origin_codes: ["TYO"], destination_codes: ["DPS"], trip_type: "roundtrip", threshold_jpy: 55000}
+  - {name: "Tokyo-PhnomPenh", destination_category: "Southeast Asia", origin_codes: ["TYO"], destination_codes: ["PNH"], trip_type: "roundtrip", threshold_jpy: 55000}
+  - {name: "Tokyo-SiemReap", destination_category: "Southeast Asia", origin_codes: ["TYO"], destination_codes: ["SAI"], trip_type: "roundtrip", threshold_jpy: 55000}
+
+  - {name: "Tokyo-Honolulu", destination_category: "Islands", origin_codes: ["TYO"], destination_codes: ["HNL"], trip_type: "roundtrip", threshold_jpy: 60000}
+  - {name: "Tokyo-Guam", destination_category: "Islands", origin_codes: ["TYO"], destination_codes: ["GUM"], trip_type: "roundtrip", threshold_jpy: 40000}
+  - {name: "Tokyo-Saipan", destination_category: "Islands", origin_codes: ["TYO"], destination_codes: ["SPN"], trip_type: "roundtrip", threshold_jpy: 40000}
+  - {name: "Tokyo-Palau", destination_category: "Islands", origin_codes: ["TYO"], destination_codes: ["ROR"], trip_type: "roundtrip", threshold_jpy: 70000}
+  - {name: "Tokyo-Cairns", destination_category: "Islands", origin_codes: ["TYO"], destination_codes: ["CNS"], trip_type: "roundtrip", threshold_jpy: 70000}
+  - {name: "Tokyo-GoldCoast", destination_category: "Islands", origin_codes: ["TYO"], destination_codes: ["OOL"], trip_type: "roundtrip", threshold_jpy: 70000}
+  - {name: "Tokyo-Phuket", destination_category: "Islands", origin_codes: ["TYO"], destination_codes: ["HKT"], trip_type: "roundtrip", threshold_jpy: 55000}
+  - {name: "Tokyo-Krabi", destination_category: "Islands", origin_codes: ["TYO"], destination_codes: ["KBV"], trip_type: "roundtrip", threshold_jpy: 55000}
+  - {name: "Tokyo-Maldives", destination_category: "Islands", origin_codes: ["TYO"], destination_codes: ["MLE"], trip_type: "roundtrip", threshold_jpy: 90000}
+
+  - {name: "Tokyo-London", destination_category: "Europe", origin_codes: ["TYO"], destination_codes: ["LHR", "LGW"], trip_type: "roundtrip", threshold_jpy: 100000, very_cheap_jpy: 90000, abnormal_jpy: 80000}
+  - {name: "Tokyo-Paris", destination_category: "Europe", origin_codes: ["TYO"], destination_codes: ["CDG"], trip_type: "roundtrip", threshold_jpy: 100000, very_cheap_jpy: 90000, abnormal_jpy: 80000}
+  - {name: "Tokyo-Frankfurt", destination_category: "Europe", origin_codes: ["TYO"], destination_codes: ["FRA"], trip_type: "roundtrip", threshold_jpy: 100000, very_cheap_jpy: 90000, abnormal_jpy: 80000}
+  - {name: "Tokyo-Munich", destination_category: "Europe", origin_codes: ["TYO"], destination_codes: ["MUC"], trip_type: "roundtrip", threshold_jpy: 100000, very_cheap_jpy: 90000, abnormal_jpy: 80000}
+  - {name: "Tokyo-Amsterdam", destination_category: "Europe", origin_codes: ["TYO"], destination_codes: ["AMS"], trip_type: "roundtrip", threshold_jpy: 100000, very_cheap_jpy: 90000, abnormal_jpy: 80000}
+  - {name: "Tokyo-Rome", destination_category: "Europe", origin_codes: ["TYO"], destination_codes: ["FCO"], trip_type: "roundtrip", threshold_jpy: 100000, very_cheap_jpy: 90000, abnormal_jpy: 80000}
+  - {name: "Tokyo-Milan", destination_category: "Europe", origin_codes: ["TYO"], destination_codes: ["MXP"], trip_type: "roundtrip", threshold_jpy: 100000, very_cheap_jpy: 90000, abnormal_jpy: 80000}
+  - {name: "Tokyo-Madrid", destination_category: "Europe", origin_codes: ["TYO"], destination_codes: ["MAD"], trip_type: "roundtrip", threshold_jpy: 100000, very_cheap_jpy: 90000, abnormal_jpy: 80000}
+  - {name: "Tokyo-Barcelona", destination_category: "Europe", origin_codes: ["TYO"], destination_codes: ["BCN"], trip_type: "roundtrip", threshold_jpy: 100000, very_cheap_jpy: 90000, abnormal_jpy: 80000}
+  - {name: "Tokyo-Zurich", destination_category: "Europe", origin_codes: ["TYO"], destination_codes: ["ZRH"], trip_type: "roundtrip", threshold_jpy: 110000, very_cheap_jpy: 90000, abnormal_jpy: 80000}
+  - {name: "Tokyo-Vienna", destination_category: "Europe", origin_codes: ["TYO"], destination_codes: ["VIE"], trip_type: "roundtrip", threshold_jpy: 100000, very_cheap_jpy: 90000, abnormal_jpy: 80000}
+  - {name: "Tokyo-Istanbul", destination_category: "Europe", origin_codes: ["TYO"], destination_codes: ["IST"], trip_type: "roundtrip", threshold_jpy: 90000, very_cheap_jpy: 90000, abnormal_jpy: 80000}
+  - {name: "Tokyo-Helsinki", destination_category: "Europe", origin_codes: ["TYO"], destination_codes: ["HEL"], trip_type: "roundtrip", threshold_jpy: 110000, very_cheap_jpy: 90000, abnormal_jpy: 80000}
+  - {name: "Tokyo-Copenhagen", destination_category: "Europe", origin_codes: ["TYO"], destination_codes: ["CPH"], trip_type: "roundtrip", threshold_jpy: 110000, very_cheap_jpy: 90000, abnormal_jpy: 80000}
+  - {name: "Tokyo-Prague", destination_category: "Europe", origin_codes: ["TYO"], destination_codes: ["PRG"], trip_type: "roundtrip", threshold_jpy: 90000, very_cheap_jpy: 90000, abnormal_jpy: 80000}
+  - {name: "Tokyo-Budapest", destination_category: "Europe", origin_codes: ["TYO"], destination_codes: ["BUD"], trip_type: "roundtrip", threshold_jpy: 90000, very_cheap_jpy: 90000, abnormal_jpy: 80000}
+  - {name: "Tokyo-Warsaw", destination_category: "Europe", origin_codes: ["TYO"], destination_codes: ["WAW"], trip_type: "roundtrip", threshold_jpy: 90000, very_cheap_jpy: 90000, abnormal_jpy: 80000}
+  - {name: "Tokyo-Athens", destination_category: "Europe", origin_codes: ["TYO"], destination_codes: ["ATH"], trip_type: "roundtrip", threshold_jpy: 100000, very_cheap_jpy: 90000, abnormal_jpy: 80000}
+
+  - {name: "Tokyo-LosAngeles", destination_category: "North America", origin_codes: ["TYO"], destination_codes: ["LAX"], trip_type: "roundtrip", threshold_jpy: 85000}
+  - {name: "Tokyo-SanFrancisco", destination_category: "North America", origin_codes: ["TYO"], destination_codes: ["SFO"], trip_type: "roundtrip", threshold_jpy: 85000}
+  - {name: "Tokyo-Seattle", destination_category: "North America", origin_codes: ["TYO"], destination_codes: ["SEA"], trip_type: "roundtrip", threshold_jpy: 85000}
+  - {name: "Tokyo-Vancouver", destination_category: "North America", origin_codes: ["TYO"], destination_codes: ["YVR"], trip_type: "roundtrip", threshold_jpy: 85000}
+  - {name: "Tokyo-NewYork", destination_category: "North America", origin_codes: ["TYO"], destination_codes: ["JFK", "EWR"], trip_type: "roundtrip", threshold_jpy: 110000}
+  - {name: "Tokyo-Toronto", destination_category: "North America", origin_codes: ["TYO"], destination_codes: ["YYZ"], trip_type: "roundtrip", threshold_jpy: 110000}
+  - {name: "Tokyo-Chicago", destination_category: "North America", origin_codes: ["TYO"], destination_codes: ["ORD"], trip_type: "roundtrip", threshold_jpy: 110000}
+  - {name: "Tokyo-LasVegas", destination_category: "North America", origin_codes: ["TYO"], destination_codes: ["LAS"], trip_type: "roundtrip", threshold_jpy: 100000}
+
+  - {name: "Tokyo-Sydney", destination_category: "Oceania", origin_codes: ["TYO"], destination_codes: ["SYD"], trip_type: "roundtrip", threshold_jpy: 80000}
+  - {name: "Tokyo-Melbourne", destination_category: "Oceania", origin_codes: ["TYO"], destination_codes: ["MEL"], trip_type: "roundtrip", threshold_jpy: 80000}
+  - {name: "Tokyo-Brisbane", destination_category: "Oceania", origin_codes: ["TYO"], destination_codes: ["BNE"], trip_type: "roundtrip", threshold_jpy: 80000}
+  - {name: "Tokyo-Perth", destination_category: "Oceania", origin_codes: ["TYO"], destination_codes: ["PER"], trip_type: "roundtrip", threshold_jpy: 85000}
+  - {name: "Tokyo-Auckland", destination_category: "Oceania", origin_codes: ["TYO"], destination_codes: ["AKL"], trip_type: "roundtrip", threshold_jpy: 95000}
+  - {name: "Tokyo-Christchurch", destination_category: "Oceania", origin_codes: ["TYO"], destination_codes: ["CHC"], trip_type: "roundtrip", threshold_jpy: 95000}
+
+  - {name: "Tokyo-Dubai", destination_category: "Middle East / Central Asia", origin_codes: ["TYO"], destination_codes: ["DXB"], trip_type: "roundtrip", threshold_jpy: 80000}
+  - {name: "Tokyo-AbuDhabi", destination_category: "Middle East / Central Asia", origin_codes: ["TYO"], destination_codes: ["AUH"], trip_type: "roundtrip", threshold_jpy: 80000}
+  - {name: "Tokyo-Doha", destination_category: "Middle East / Central Asia", origin_codes: ["TYO"], destination_codes: ["DOH"], trip_type: "roundtrip", threshold_jpy: 80000}
+  - {name: "Tokyo-Tashkent", destination_category: "Middle East / Central Asia", origin_codes: ["TYO"], destination_codes: ["TAS"], trip_type: "roundtrip", threshold_jpy: 80000}
+  - {name: "Tokyo-Almaty", destination_category: "Middle East / Central Asia", origin_codes: ["TYO"], destination_codes: ["ALA"], trip_type: "roundtrip", threshold_jpy: 80000}
+
+date_windows:
+  golden_week:
+    label: "黄金周"
+    ranges:
+      - start: "2026-04-15"
+        end: "2026-05-20"
+    candidate_trips:
+      - {depart: "2026-04-20", return: "2026-05-01"}
+      - {depart: "2026-04-25", return: "2026-05-05"}
+      - {depart: "2026-04-26", return: "2026-05-06"}
+      - {depart: "2026-04-29", return: "2026-05-08"}
+      - {depart: "2026-05-01", return: "2026-05-10"}
+      - {depart: "2026-05-03", return: "2026-05-12"}
+
+  year_end:
+    label: "年末年始"
+    ranges:
+      - start: "2026-12-10"
+        end: "2027-01-20"
+    candidate_trips:
+      - {depart: "2026-12-15", return: "2027-01-03"}
+      - {depart: "2026-12-20", return: "2027-01-05"}
+      - {depart: "2026-12-25", return: "2027-01-06"}
+      - {depart: "2026-12-28", return: "2027-01-07"}
+      - {depart: "2026-12-30", return: "2027-01-10"}
+      - {depart: "2027-01-03", return: "2027-01-15"}
+
+  spring_festival:
+    label: "春节"
+    enabled: false
+    ranges: []
+    candidate_trips: []
+
+sources:
+  google_flights:
+    enabled: true
+    mode: "link_only"
+  skyscanner:
+    enabled: true
+    mode: "link_only"
+  trip_com:
+    enabled: true
+    mode: "link_only"
+  ctrip:
+    enabled: true
+    mode: "link_only"
+  fliggy:
+    enabled: true
+    mode: "link_only"
+  airline_official:
+    enabled: true
+    mode: "link_only"
+  playwright_optional:
+    enabled: false
+    max_requests_per_run: 20
+    skip_on_login_or_captcha: true
