@@ -17,6 +17,7 @@ on:
           - weekly
           - global
           - domestic
+          - all
           - dry-run
 
 jobs:
@@ -47,6 +48,7 @@ jobs:
               weekly) python flight_price_monitor.py --config flight_price_config.yaml --weekly-report ;;
               global) python flight_price_monitor.py --config flight_price_config.yaml --global-only ;;
               domestic) python flight_price_monitor.py --config flight_price_config.yaml --domestic-only ;;
+              all) python flight_price_monitor.py --config flight_price_config.yaml ;;
               dry-run) python flight_price_monitor.py --config flight_price_config.yaml --core-only --link-only --dry-run ;;
               *) python flight_price_monitor.py --config flight_price_config.yaml --core-only ;;
             esac
