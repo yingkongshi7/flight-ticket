@@ -17,6 +17,7 @@ import logging
 import os
 import smtplib
 import sys
+from collections import Counter
 from dataclasses import dataclass, field
 from email.message import EmailMessage
 from pathlib import Path
@@ -539,6 +540,62 @@ def send_email(config: dict[str, Any], subject: str, text_body: str, html_body: 
         server.send_message(msg)
 
 
+def run_scope(args: argparse.Namespace) -> str:
+    if args.core_only:
+        return "core"
+    if args.domestic_only:
+        return "domestic"
+    if args.global_only:
+        return "global"
+    return "all"
+
+
+def build_run_summary(
+    candidates: list[SearchCandidate],
+    source_results: list[SourceResult],
+    alerts_to_send: list[dict[str, Any]],
+    scope: str,
+) -> str:
+    category_counts = Counter(c.destination_category for c in candidates)
+    source_counts = Counter(r.source_name.split(":")[0] for r in source_results)
+    priced_count = sum(1 for r in source_results if r.price_jpy is not None)
+    manual_count = sum(1 for r in source_results if r.price_jpy is None)
+    lines = [
+        "## Flight Price Monitor Summary",
+        "",
+        f"- Mode: `{scope}`",
+        f"- Candidate searches: `{len(candidates)}`",
+        f"- Source checks / links generated: `{len(source_results)}`",
+        f"- Priced results: `{priced_count}`",
+        f"- Manual-check links: `{manual_count}`",
+        f"- Alert emails prepared: `{len(alerts_to_send)}`",
+        "",
+        "### Categories",
+    ]
+    for category, count in sorted(category_counts.items()):
+        lines.append(f"- {category}: `{count}`")
+    lines += ["", "### Sources"]
+    for source, count in sorted(source_counts.items()):
+        lines.append(f"- {source}: `{count}`")
+    if not alerts_to_send:
+        lines += [
+            "",
+            "No alert email was sent/prepared. With the default `link_only` source settings, this is expected unless a compliant price adapter supplies prices.",
+        ]
+    return "\n".join(lines)
+
+
+def publish_github_step_summary(summary: str) -> None:
+    summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
+    if not summary_path:
+        return
+    try:
+        with open(summary_path, "a", encoding="utf-8") as f:
+            f.write(summary + "\n")
+    except OSError as exc:
+        logging.warning("Could not write GitHub step summary: %s", exc)
+
+
 def update_state_for_result(state: dict[str, Any], alert: dict[str, Any]) -> None:
     result: SourceResult = alert["result"]
     c = result.candidate
@@ -598,6 +655,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--domestic-only", action="store_true")
     parser.add_argument("--global-only", action="store_true")
     parser.add_argument("--link-only", action="store_true")
+    parser.add_argument("--force", action="store_true", help="Run even if this mode already ran today.")
     parser.add_argument("--verbose", action="store_true")
     return parser
 
@@ -609,6 +667,7 @@ def main() -> int:
     dry_run = args.dry_run or bool(config.get("settings", {}).get("dry_run_default", False))
     state = load_state(args.state)
     today = dt.date.today().isoformat()
+    scope = run_scope(args)
 
     if args.test_email:
         subject = "机票监控测试邮件"
@@ -628,8 +687,9 @@ def main() -> int:
             send_email(config, subject, text, html_body)
         return 0
 
-    if not dry_run and state.setdefault("runs", {}).get("last_monitor_run_date") == today:
-        logging.info("Monitor already ran today (%s); exiting to avoid duplicate daily runs.", today)
+    run_key = f"last_{scope}_run_date"
+    if not dry_run and not args.force and state.setdefault("runs", {}).get(run_key) == today:
+        logging.info("Monitor mode '%s' already ran today (%s); exiting to avoid duplicate daily runs.", scope, today)
         return 0
 
     candidates = generate_candidate_searches(
@@ -640,16 +700,21 @@ def main() -> int:
     )
     logging.info("Generated %d candidate searches.", len(candidates))
     alerts_to_send: list[dict[str, Any]] = []
+    source_results: list[SourceResult] = []
 
     for candidate in candidates:
         for source_result in build_source_links(candidate, config):
             result = fetch_price_optional(source_result, config, link_only=args.link_only)
+            source_results.append(result)
             alert = evaluate_price_alert(result, state, config)
             update_state_for_result(state, alert)
             if deduplicate_alert(alert, state, config):
                 alerts_to_send.append(alert)
 
     logging.info("Prepared %d alert email(s).", len(alerts_to_send))
+    summary = build_run_summary(candidates, source_results, alerts_to_send, scope)
+    logging.info("\n%s", summary)
+    publish_github_step_summary(summary)
     for alert in alerts_to_send:
         subject, text_body, html_body = build_alert_email(alert)
         if dry_run:
@@ -663,7 +728,7 @@ def main() -> int:
     if dry_run:
         logging.info("Dry run: state not saved.")
     else:
-        state.setdefault("runs", {})["last_monitor_run_date"] = today
+        state.setdefault("runs", {})[run_key] = today
         save_state(state, args.state)
     return 0
 
