@@ -27,6 +27,8 @@ jobs:
       contents: read
     env:
       SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+      AMADEUS_CLIENT_ID: ${{ secrets.AMADEUS_CLIENT_ID }}
+      AMADEUS_CLIENT_SECRET: ${{ secrets.AMADEUS_CLIENT_SECRET }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
