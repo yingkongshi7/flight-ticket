@@ -1,1 +1,57 @@
+name: Flight Price Monitor
 
+on:
+  schedule:
+    # 23:00 UTC = 08:00 JST next day
+    - cron: "0 23 * * *"
+    # 00:00 UTC Saturday = 09:00 JST Saturday
+    - cron: "0 0 * * 6"
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "Run mode"
+        type: choice
+        default: "core"
+        options:
+          - core
+          - weekly
+          - global
+          - domestic
+          - dry-run
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Restore state cache
+        uses: actions/cache@v4
+        with:
+          path: flight_price_state.json
+          key: flight-price-state-${{ github.run_id }}
+          restore-keys: |
+            flight-price-state-
+      - name: Run monitor
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            case "${{ inputs.mode }}" in
+              weekly) python flight_price_monitor.py --config flight_price_config.yaml --weekly-report ;;
+              global) python flight_price_monitor.py --config flight_price_config.yaml --global-only ;;
+              domestic) python flight_price_monitor.py --config flight_price_config.yaml --domestic-only ;;
+              dry-run) python flight_price_monitor.py --config flight_price_config.yaml --core-only --link-only --dry-run ;;
+              *) python flight_price_monitor.py --config flight_price_config.yaml --core-only ;;
+            esac
+          elif [ "$(date -u +%u)" = "6" ] && [ "$(date -u +%H)" = "00" ]; then
+            python flight_price_monitor.py --config flight_price_config.yaml --weekly-report
+          else
+            python flight_price_monitor.py --config flight_price_config.yaml --core-only
+          fi
