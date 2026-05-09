@@ -2,12 +2,12 @@ smtp:
   host: smtp.gmail.com
   port: 587
   use_tls: true
-  username: "hailuwang71@gmail.com"
+  username: "your_email@gmail.com"
 
 email:
-  from: "hailuwang71@gmail.com"
+  from: "your_email@gmail.com"
   to:
-    - "hailuwang71@gmail.com"
+    - "your_email@gmail.com"
   password_env: SMTP_PASSWORD
 
 settings:
@@ -31,18 +31,18 @@ core_routes:
     spring_festival_threshold_jpy: 70000
 
 domestic_routes:
-  - {name: "Tokyo-Sapporo", destination_category: "Domestic Japan", origin_codes: ["TYO", "HND", "NRT"], destination_codes: ["CTS"], trip_type: "oneway", threshold_jpy: 8000}
-  - {name: "Tokyo-Okinawa", destination_category: "Domestic Japan", origin_codes: ["TYO", "HND", "NRT"], destination_codes: ["OKA"], trip_type: "oneway", threshold_jpy: 10000}
-  - {name: "Tokyo-Fukuoka", destination_category: "Domestic Japan", origin_codes: ["TYO", "HND", "NRT"], destination_codes: ["FUK"], trip_type: "oneway", threshold_jpy: 8000}
-  - {name: "Tokyo-Kumamoto", destination_category: "Domestic Japan", origin_codes: ["TYO", "HND", "NRT"], destination_codes: ["KMJ"], trip_type: "oneway", threshold_jpy: 10000}
-  - {name: "Tokyo-Kagoshima", destination_category: "Domestic Japan", origin_codes: ["TYO", "HND", "NRT"], destination_codes: ["KOJ"], trip_type: "oneway", threshold_jpy: 10000}
-  - {name: "Tokyo-Nagasaki", destination_category: "Domestic Japan", origin_codes: ["TYO", "HND", "NRT"], destination_codes: ["NGS"], trip_type: "oneway", threshold_jpy: 10000}
-  - {name: "Tokyo-Miyazaki", destination_category: "Domestic Japan", origin_codes: ["TYO", "HND", "NRT"], destination_codes: ["KMI"], trip_type: "oneway", threshold_jpy: 10000}
-  - {name: "Tokyo-Oita", destination_category: "Domestic Japan", origin_codes: ["TYO", "HND", "NRT"], destination_codes: ["OIT"], trip_type: "oneway", threshold_jpy: 10000}
-  - {name: "Tokyo-Kitakyushu", destination_category: "Domestic Japan", origin_codes: ["TYO", "HND", "NRT"], destination_codes: ["KKJ"], trip_type: "oneway", threshold_jpy: 10000}
-  - {name: "Tokyo-Ishigaki", destination_category: "Domestic Japan", origin_codes: ["TYO", "HND", "NRT"], destination_codes: ["ISG"], trip_type: "oneway", threshold_jpy: 15000}
-  - {name: "Tokyo-Miyakojima", destination_category: "Domestic Japan", origin_codes: ["TYO", "HND", "NRT"], destination_codes: ["MMY"], trip_type: "oneway", threshold_jpy: 15000}
-  - {name: "Tokyo-Amami", destination_category: "Domestic Japan", origin_codes: ["TYO", "HND", "NRT"], destination_codes: ["ASJ"], trip_type: "oneway", threshold_jpy: 15000}
+  - {name: "Tokyo-Sapporo", destination_category: "Domestic Japan", origin_codes: ["TYO", "HND", "NRT"], destination_codes: ["CTS"], trip_type: "oneway", threshold_jpy: 7200}
+  - {name: "Tokyo-Okinawa", destination_category: "Domestic Japan", origin_codes: ["TYO", "HND", "NRT"], destination_codes: ["OKA"], trip_type: "oneway", threshold_jpy: 9000}
+  - {name: "Tokyo-Fukuoka", destination_category: "Domestic Japan", origin_codes: ["TYO", "HND", "NRT"], destination_codes: ["FUK"], trip_type: "oneway", threshold_jpy: 7200}
+  - {name: "Tokyo-Kumamoto", destination_category: "Domestic Japan", origin_codes: ["TYO", "HND", "NRT"], destination_codes: ["KMJ"], trip_type: "oneway", threshold_jpy: 9000}
+  - {name: "Tokyo-Kagoshima", destination_category: "Domestic Japan", origin_codes: ["TYO", "HND", "NRT"], destination_codes: ["KOJ"], trip_type: "oneway", threshold_jpy: 9000}
+  - {name: "Tokyo-Nagasaki", destination_category: "Domestic Japan", origin_codes: ["TYO", "HND", "NRT"], destination_codes: ["NGS"], trip_type: "oneway", threshold_jpy: 9000}
+  - {name: "Tokyo-Miyazaki", destination_category: "Domestic Japan", origin_codes: ["TYO", "HND", "NRT"], destination_codes: ["KMI"], trip_type: "oneway", threshold_jpy: 9000}
+  - {name: "Tokyo-Oita", destination_category: "Domestic Japan", origin_codes: ["TYO", "HND", "NRT"], destination_codes: ["OIT"], trip_type: "oneway", threshold_jpy: 9000}
+  - {name: "Tokyo-Kitakyushu", destination_category: "Domestic Japan", origin_codes: ["TYO", "HND", "NRT"], destination_codes: ["KKJ"], trip_type: "oneway", threshold_jpy: 9000}
+  - {name: "Tokyo-Ishigaki", destination_category: "Domestic Japan", origin_codes: ["TYO", "HND", "NRT"], destination_codes: ["ISG"], trip_type: "oneway", threshold_jpy: 13500}
+  - {name: "Tokyo-Miyakojima", destination_category: "Domestic Japan", origin_codes: ["TYO", "HND", "NRT"], destination_codes: ["MMY"], trip_type: "oneway", threshold_jpy: 13500}
+  - {name: "Tokyo-Amami", destination_category: "Domestic Japan", origin_codes: ["TYO", "HND", "NRT"], destination_codes: ["ASJ"], trip_type: "oneway", threshold_jpy: 13500}
 
 global_routes:
   - {name: "Tokyo-Seoul", destination_category: "Northeast Asia", origin_codes: ["TYO"], destination_codes: ["ICN", "GMP"], trip_type: "roundtrip", threshold_jpy: 20000}

@@ -101,7 +101,15 @@ python flight_price_monitor.py --config flight_price_config.yaml --core-only
 
 已提供 `.github/workflows/flight-price-monitor.yml`。它使用 UTC cron：
 
-- `23:00 UTC` = 日本时间次日 `08:00`，运行核心路线。
+- `23:00 UTC` = 日本时间次日 `08:00`，每天运行核心路线。
+- `23:30 UTC` = 日本时间次日 `08:30`，每天运行全球路线。
 - `00:00 UTC Saturday` = 日本时间周六 `09:00`，发送周报。
+- `00:30 UTC Saturday` = 日本时间周六 `09:30`，每周运行日本国内路线。
 
 手动运行时可在 Actions 页面选择 `workflow_dispatch`。
+
+手动测试同一天重复运行时，选择：
+
+- `core-force`
+- `global-force`
+- `domestic-force`
