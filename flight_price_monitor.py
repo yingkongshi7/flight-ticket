@@ -858,7 +858,7 @@ def build_run_summary(
     )
     if priced_results:
         lines += ["", "### Lowest priced results"]
-        for result in priced_results[:10]:
+        for result in unique_display_results(priced_results)[:10]:
             c = result.candidate
             route_dates = f"{c.depart_date}" if not c.return_date else f"{c.depart_date} -> {c.return_date}"
             lines.append(
@@ -872,7 +872,7 @@ def build_run_summary(
     )
     if below_threshold_alerts:
         lines += ["", "### Below-threshold results"]
-        for alert in below_threshold_alerts[:10]:
+        for alert in unique_display_alerts(below_threshold_alerts)[:10]:
             result = alert["result"]
             c = result.candidate
             route_dates = f"{c.depart_date}" if not c.return_date else f"{c.depart_date} -> {c.return_date}"
@@ -888,6 +888,35 @@ def build_run_summary(
             "No alert email was sent/prepared because no result met the alert rules. If `Priced results` is `0`, check `Source statuses` to see whether API credentials are missing, the API returned no offers, or only link-only sources ran.",
         ]
     return "\n".join(lines)
+
+
+def unique_display_results(results: list[SourceResult]) -> list[SourceResult]:
+    best_by_group: dict[str, SourceResult] = {}
+    for result in results:
+        c = result.candidate
+        key = "|".join([c.route_name, c.destination, c.depart_date, c.return_date or "", result.source_name])
+        existing = best_by_group.get(key)
+        if existing is None or (result.price_jpy or 10**12) < (existing.price_jpy or 10**12):
+            best_by_group[key] = result
+    return sorted(
+        best_by_group.values(),
+        key=lambda r: (r.price_jpy or 10**12, r.candidate.route_name, r.candidate.depart_date),
+    )
+
+
+def unique_display_alerts(alerts: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    best_by_group: dict[str, dict[str, Any]] = {}
+    for alert in alerts:
+        result: SourceResult = alert["result"]
+        c = result.candidate
+        key = "|".join([c.route_name, c.destination, c.depart_date, c.return_date or "", result.source_name])
+        existing = best_by_group.get(key)
+        if existing is None or (result.price_jpy or 10**12) < (existing["result"].price_jpy or 10**12):
+            best_by_group[key] = alert
+    return sorted(
+        best_by_group.values(),
+        key=lambda a: (a["result"].price_jpy or 10**12, a["result"].candidate.route_name, a["result"].candidate.depart_date),
+    )
 
 
 def publish_github_step_summary(summary: str) -> None:
