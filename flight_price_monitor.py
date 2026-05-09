@@ -78,6 +78,19 @@ class SearchCandidate:
             ]
         )
 
+    @property
+    def alert_group_key(self) -> str:
+        return "|".join(
+            [
+                self.route_name,
+                self.destination,
+                self.depart_date,
+                self.return_date or "",
+                self.trip_type,
+                self.window_key,
+            ]
+        )
+
 
 @dataclass
 class SourceResult:
@@ -91,6 +104,10 @@ class SourceResult:
     @property
     def key(self) -> str:
         return f"{self.candidate.key_base}|{self.source_name}"
+
+    @property
+    def alert_key(self) -> str:
+        return f"{self.candidate.alert_group_key}|{self.source_name}|{self.price_jpy or 'manual'}"
 
 
 def setup_logging(verbose: bool = False) -> None:
@@ -647,7 +664,8 @@ def deduplicate_alert(alert: dict[str, Any], state: dict[str, Any], config: dict
     settings = config.get("settings", {})
     dedup_days = int(settings.get("dedup_days", 7))
     repeat_drop_pct = float(settings.get("significant_drop_repeat_pct", 10))
-    last_alert = state.get("alerts", {}).get(result.key)
+    legacy_alert = state.get("alerts", {}).get(result.key)
+    last_alert = state.get("alerts", {}).get(result.alert_key) or state.get("alerts", {}).get(result.candidate.alert_group_key) or legacy_alert
     if not last_alert:
         return True
     last_date = parse_date(last_alert.get("date", "1970-01-01"))
@@ -928,7 +946,8 @@ def update_state_for_result(state: dict[str, Any], alert: dict[str, Any]) -> Non
 
 def mark_alert_sent(state: dict[str, Any], alert: dict[str, Any]) -> None:
     result: SourceResult = alert["result"]
-    state.setdefault("alerts", {})[result.key] = {"date": dt.date.today().isoformat(), "price_jpy": result.price_jpy}
+    state.setdefault("alerts", {})[result.alert_key] = {"date": dt.date.today().isoformat(), "price_jpy": result.price_jpy}
+    state.setdefault("alerts", {})[result.candidate.alert_group_key] = {"date": dt.date.today().isoformat(), "price_jpy": result.price_jpy}
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
@@ -989,6 +1008,7 @@ def main() -> int:
     logging.info("Generated %d candidate searches.", len(candidates))
     alerts_to_send: list[dict[str, Any]] = []
     evaluated_alerts: list[dict[str, Any]] = []
+    queued_alert_groups: set[str] = set()
     source_results: list[SourceResult] = []
 
     for candidate in candidates:
@@ -997,10 +1017,14 @@ def main() -> int:
             source_results.append(result)
             alert = evaluate_price_alert(result, state, config)
             evaluated_alerts.append(alert)
+            run_group_key = result.candidate.alert_group_key
             if args.force_alerts and alert["alert_needed"]:
+                if run_group_key not in queued_alert_groups:
+                    alerts_to_send.append(alert)
+                    queued_alert_groups.add(run_group_key)
+            elif deduplicate_alert(alert, state, config) and run_group_key not in queued_alert_groups:
                 alerts_to_send.append(alert)
-            elif deduplicate_alert(alert, state, config):
-                alerts_to_send.append(alert)
+                queued_alert_groups.add(run_group_key)
             update_state_for_result(state, alert)
 
     logging.info("Prepared %d alert email(s).", len(alerts_to_send))
