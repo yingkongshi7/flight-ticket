@@ -2,12 +2,12 @@ smtp:
   host: smtp.gmail.com
   port: 587
   use_tls: true
-  username: "hailuwang71@gmail.com"
+  username: "your_email@gmail.com"
 
 email:
-  from: "hailuwang71@gmail.com"
+  from: "your_email@gmail.com"
   to:
-    - "hailuwang71@gmail.com"
+    - "your_email@gmail.com"
   password_env: SMTP_PASSWORD
 
 settings:
@@ -167,8 +167,17 @@ date_windows:
     candidate_trips: []
 
 sources:
-  amadeus:
+  travelpayouts:
     enabled: true
+    mode: "api"
+    token_env: TRAVELPAYOUTS_TOKEN
+    currency: jpy
+    market: jp
+    max_requests_per_run: 80
+    offers_limit: 5
+    marker: ""
+  amadeus:
+    enabled: false
     mode: "api"
     environment: "test"
     client_id_env: AMADEUS_CLIENT_ID

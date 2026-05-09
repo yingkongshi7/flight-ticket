@@ -34,6 +34,7 @@ ALLOWED_TOKYO_ORIGINS = {"TYO", "HND", "NRT"}
 MANUAL_ONLY_SOURCES = {"google_flights", "skyscanner", "trip_com", "ctrip", "fliggy", "airline_official"}
 AMADEUS_TOKEN_CACHE: dict[str, Any] = {}
 AMADEUS_REQUEST_COUNT = 0
+TRAVELPAYOUTS_REQUEST_COUNT = 0
 WEEKLY_GROUPS = [
     ("核心路线：东京-西安", ["Core China"]),
     ("中国大陆/港澳台低价", ["China / HK / Taiwan"]),
@@ -336,12 +337,125 @@ def build_source_links(c: SearchCandidate, config: dict[str, Any]) -> list[Sourc
         source_cfg = sources.get(name, {})
         if source_cfg.get("enabled", True):
             results.append(SourceResult(candidate=c, source_name=name, query_link=builder(c)))
+    if (sources.get("travelpayouts", {}) or {}).get("enabled", False):
+        results.append(SourceResult(candidate=c, source_name="travelpayouts", query_link=build_travelpayouts_search_link(c, config)))
     if (sources.get("amadeus", {}) or {}).get("enabled", False):
         results.append(SourceResult(candidate=c, source_name="amadeus", query_link=build_amadeus_api_link(c, config)))
     if (sources.get("airline_official", {}) or {}).get("enabled", True):
         for airline, link in build_airline_links(c).items():
             results.append(SourceResult(candidate=c, source_name=f"airline_official:{airline}", query_link=link))
     return results
+
+
+def build_travelpayouts_search_link(c: SearchCandidate, config: dict[str, Any]) -> str:
+    source_cfg = (config.get("sources") or {}).get("travelpayouts", {})
+    marker = source_cfg.get("marker")
+    params = {
+        "origin_iata": c.origin,
+        "destination_iata": c.destination,
+        "depart_date": c.depart_date,
+        "currency": "jpy",
+        "one_way": "true" if c.trip_type == "oneway" else "false",
+    }
+    if c.return_date:
+        params["return_date"] = c.return_date
+    if marker:
+        params["marker"] = marker
+    return "https://www.aviasales.com/search?" + urlencode(params)
+
+
+def build_travelpayouts_api_url(c: SearchCandidate, config: dict[str, Any]) -> str:
+    params = travelpayouts_params(c, config)
+    return "https://api.travelpayouts.com/aviasales/v3/prices_for_dates?" + urlencode(params)
+
+
+def travelpayouts_params(c: SearchCandidate, config: dict[str, Any]) -> dict[str, Any]:
+    source_cfg = (config.get("sources") or {}).get("travelpayouts", {})
+    params: dict[str, Any] = {
+        "origin": c.origin,
+        "destination": c.destination,
+        "currency": source_cfg.get("currency", "jpy"),
+        "departure_at": c.depart_date,
+        "one_way": "true" if c.trip_type == "oneway" else "false",
+        "sorting": "price",
+        "direct": "false",
+        "limit": int(source_cfg.get("offers_limit", 5)),
+        "page": 1,
+    }
+    if c.return_date:
+        params["return_at"] = c.return_date
+    market = source_cfg.get("market")
+    if market:
+        params["market"] = market
+    return params
+
+
+def fetch_travelpayouts_price(result: SourceResult, config: dict[str, Any]) -> SourceResult:
+    global TRAVELPAYOUTS_REQUEST_COUNT
+    source_cfg = (config.get("sources") or {}).get("travelpayouts", {})
+    max_requests = int(source_cfg.get("max_requests_per_run", 80))
+    if TRAVELPAYOUTS_REQUEST_COUNT >= max_requests:
+        result.status = "skipped"
+        result.message = f"Travelpayouts max_requests_per_run reached ({max_requests})"
+        return result
+
+    token = os.environ.get(source_cfg.get("token_env", "TRAVELPAYOUTS_TOKEN"))
+    if not token:
+        result.status = "skipped"
+        result.message = "Travelpayouts token missing"
+        return result
+
+    TRAVELPAYOUTS_REQUEST_COUNT += 1
+    try:
+        response = requests.get(
+            "https://api.travelpayouts.com/aviasales/v3/prices_for_dates",
+            params=travelpayouts_params(result.candidate, config),
+            headers={"X-Access-Token": token},
+            timeout=30,
+        )
+    except requests.RequestException as exc:
+        result.status = "failed"
+        result.message = f"Travelpayouts request failed: {exc}"
+        return result
+
+    if response.status_code == 429:
+        result.status = "rate_limited"
+        result.message = "Travelpayouts rate limit reached"
+        return result
+    if response.status_code >= 400:
+        result.status = "failed"
+        result.message = f"Travelpayouts HTTP {response.status_code}: {response.text[:300]}"
+        return result
+
+    payload = response.json()
+    if payload.get("success") is False:
+        result.status = "failed"
+        result.message = f"Travelpayouts returned success=false: {str(payload)[:300]}"
+        return result
+
+    data = payload.get("data") or []
+    if isinstance(data, dict):
+        data = list(data.values())
+
+    prices: list[int] = []
+    for item in data:
+        if not isinstance(item, dict):
+            continue
+        total = item.get("price", item.get("value"))
+        try:
+            prices.append(int(round(float(total))))
+        except (TypeError, ValueError):
+            continue
+
+    if not prices:
+        result.status = "no_price"
+        result.message = "Travelpayouts returned no cached priced offers"
+        return result
+
+    result.price_jpy = min(prices)
+    result.status = "success"
+    result.message = "Travelpayouts cached Aviasales price returned"
+    return result
 
 
 def amadeus_base_url(config: dict[str, Any]) -> str:
@@ -476,6 +590,8 @@ def fetch_price_optional(result: SourceResult, config: dict[str, Any], link_only
     this with a legal API adapter or a very conservative Playwright adapter that
     exits on login, CAPTCHA, or bot checks.
     """
+    if result.source_name == "travelpayouts" and not link_only:
+        return fetch_travelpayouts_price(result, config)
     if result.source_name == "amadeus" and not link_only:
         return fetch_amadeus_price(result, config)
     source_cfg = (config.get("sources") or {}).get(result.source_name.split(":")[0], {})
@@ -692,6 +808,7 @@ def build_run_summary(
     source_counts = Counter(r.source_name.split(":")[0] for r in source_results)
     priced_count = sum(1 for r in source_results if r.price_jpy is not None)
     manual_count = sum(1 for r in source_results if r.price_jpy is None)
+    status_counts = Counter(f"{r.source_name.split(':')[0]}:{r.status}" for r in source_results)
     lines = [
         "## Flight Price Monitor Summary",
         "",
@@ -709,10 +826,13 @@ def build_run_summary(
     lines += ["", "### Sources"]
     for source, count in sorted(source_counts.items()):
         lines.append(f"- {source}: `{count}`")
+    lines += ["", "### Source statuses"]
+    for status, count in sorted(status_counts.items()):
+        lines.append(f"- {status}: `{count}`")
     if not alerts_to_send:
         lines += [
             "",
-            "No alert email was sent/prepared. With the default `link_only` source settings, this is expected unless a compliant price adapter supplies prices.",
+            "No alert email was sent/prepared because no result met the alert rules. If `Priced results` is `0`, check `Source statuses` to see whether API credentials are missing, the API returned no offers, or only link-only sources ran.",
         ]
     return "\n".join(lines)
 
