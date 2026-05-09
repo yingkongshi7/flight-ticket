@@ -2,12 +2,12 @@ smtp:
   host: smtp.gmail.com
   port: 587
   use_tls: true
-  username: "your_email@gmail.com"
+  username: "hailuwang71@gmail.com"
 
 email:
-  from: "your_email@gmail.com"
+  from: "hailuwang71@gmail.com"
   to:
-    - "your_email@gmail.com"
+    - "hailuwang71@gmail.com"
   password_env: SMTP_PASSWORD
 
 settings:
