@@ -997,11 +997,11 @@ def main() -> int:
             source_results.append(result)
             alert = evaluate_price_alert(result, state, config)
             evaluated_alerts.append(alert)
-            update_state_for_result(state, alert)
             if args.force_alerts and alert["alert_needed"]:
                 alerts_to_send.append(alert)
             elif deduplicate_alert(alert, state, config):
                 alerts_to_send.append(alert)
+            update_state_for_result(state, alert)
 
     logging.info("Prepared %d alert email(s).", len(alerts_to_send))
     summary = build_run_summary(candidates, source_results, evaluated_alerts, alerts_to_send, scope)
