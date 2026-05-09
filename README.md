@@ -71,6 +71,12 @@ python flight_price_monitor.py --config flight_price_config.yaml --core-only
 
 注意：Travelpayouts / Aviasales Data API 返回的是缓存数据，通常来自最近用户搜索数据，适合每天监控低价趋势，不适合强实时出票。查不到价格时脚本会保留人工确认链接。
 
+当前策略：
+
+- `domestic` 使用精确日期 `prices_for_dates`。
+- `core` 先使用精确日期 `prices_for_dates`，没有报价时 fallback 到 `get_latest_prices` 缓存低价发现模式，并保留人工确认链接。
+- `global` 使用更宽松的 `get_latest_prices` 缓存低价发现模式，更适合发现全球便宜机会。
+
 ## Amadeus 可选源
 
 如果以后恢复使用 Amadeus，可把 `flight_price_config.yaml` 里的 `sources.amadeus.enabled` 改为 `true`，并设置 GitHub Secrets：

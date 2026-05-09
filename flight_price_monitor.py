@@ -17,6 +17,7 @@ import logging
 import os
 import smtplib
 import sys
+import time
 from collections import Counter
 from dataclasses import dataclass, field
 from email.message import EmailMessage
@@ -422,6 +423,9 @@ def fetch_travelpayouts_price(result: SourceResult, config: dict[str, Any]) -> S
         result.message = "Travelpayouts token missing"
         return result
 
+    if should_use_travelpayouts_flexible(result.candidate, config):
+        return fetch_travelpayouts_flexible_price(result, config, token)
+
     TRAVELPAYOUTS_REQUEST_COUNT += 1
     try:
         response = requests.get(
@@ -465,6 +469,12 @@ def fetch_travelpayouts_price(result: SourceResult, config: dict[str, Any]) -> S
             continue
 
     if not prices:
+        if should_use_travelpayouts_core_fallback(result.candidate, config):
+            fallback = fetch_travelpayouts_flexible_price(result, config, token)
+            if fallback.price_jpy is not None:
+                fallback.status = "success_core_flexible"
+                fallback.message = "Travelpayouts exact date had no offer; core flexible cached latest price returned"
+            return fallback
         result.status = "no_price"
         result.message = "Travelpayouts returned no cached priced offers"
         return result
@@ -472,6 +482,109 @@ def fetch_travelpayouts_price(result: SourceResult, config: dict[str, Any]) -> S
     result.price_jpy = min(prices)
     result.status = "success"
     result.message = "Travelpayouts cached Aviasales price returned"
+    return result
+
+
+def should_use_travelpayouts_flexible(c: SearchCandidate, config: dict[str, Any]) -> bool:
+    source_cfg = (config.get("sources") or {}).get("travelpayouts", {})
+    if not source_cfg.get("flexible_global_fallback", True):
+        return False
+    return c.destination_category not in {"Domestic Japan", "Core China"}
+
+
+def should_use_travelpayouts_core_fallback(c: SearchCandidate, config: dict[str, Any]) -> bool:
+    source_cfg = (config.get("sources") or {}).get("travelpayouts", {})
+    return bool(source_cfg.get("flexible_core_fallback", True) and c.destination_category == "Core China")
+
+
+def travelpayouts_flexible_params(c: SearchCandidate, config: dict[str, Any]) -> dict[str, Any]:
+    source_cfg = (config.get("sources") or {}).get("travelpayouts", {})
+    today = dt.date.today()
+    params: dict[str, Any] = {
+        "origin": c.origin,
+        "destination": c.destination,
+        "currency": source_cfg.get("currency", "jpy"),
+        "beginning_of_period": today.replace(day=1).isoformat(),
+        "period_type": source_cfg.get("flexible_period_type", "month"),
+        "group_by": "dates",
+        "one_way": "true" if c.trip_type == "oneway" else "false",
+        "sorting": "price",
+        "limit": int(source_cfg.get("flexible_offers_limit", 10)),
+        "page": 1,
+    }
+    market = source_cfg.get("market")
+    if market:
+        params["market"] = market
+    return params
+
+
+def fetch_travelpayouts_flexible_price(result: SourceResult, config: dict[str, Any], token: str) -> SourceResult:
+    global TRAVELPAYOUTS_REQUEST_COUNT
+    source_cfg = (config.get("sources") or {}).get("travelpayouts", {})
+    if TRAVELPAYOUTS_REQUEST_COUNT and TRAVELPAYOUTS_REQUEST_COUNT % int(source_cfg.get("pause_every_requests", 250)) == 0:
+        time.sleep(float(source_cfg.get("pause_seconds", 2)))
+
+    TRAVELPAYOUTS_REQUEST_COUNT += 1
+    try:
+        response = requests.get(
+            "https://api.travelpayouts.com/aviasales/v3/get_latest_prices",
+            params=travelpayouts_flexible_params(result.candidate, config),
+            headers={"X-Access-Token": token, "Accept-Encoding": "gzip, deflate"},
+            timeout=30,
+        )
+    except requests.RequestException as exc:
+        result.status = "failed"
+        result.message = f"Travelpayouts flexible request failed: {exc}"
+        return result
+
+    if response.status_code == 429:
+        result.status = "rate_limited"
+        result.message = "Travelpayouts flexible rate limit reached"
+        return result
+    if response.status_code >= 400:
+        result.status = "failed"
+        result.message = f"Travelpayouts flexible HTTP {response.status_code}: {response.text[:300]}"
+        return result
+
+    payload = response.json()
+    if payload.get("success") is False:
+        result.status = "failed"
+        result.message = f"Travelpayouts flexible returned success=false: {str(payload)[:300]}"
+        return result
+
+    data = payload.get("data") or []
+    if isinstance(data, dict):
+        data = list(data.values())
+
+    best: dict[str, Any] | None = None
+    best_price: int | None = None
+    for item in data:
+        if not isinstance(item, dict):
+            continue
+        total = item.get("price", item.get("value"))
+        try:
+            price = int(round(float(total)))
+        except (TypeError, ValueError):
+            continue
+        if best_price is None or price < best_price:
+            best_price = price
+            best = item
+
+    if best_price is None:
+        result.status = "no_price"
+        result.message = "Travelpayouts flexible returned no cached priced offers"
+        return result
+
+    result.price_jpy = best_price
+    if best:
+        depart = best.get("depart_date") or best.get("departure_at")
+        ret = best.get("return_date") or best.get("return_at")
+        if depart:
+            result.candidate.depart_date = str(depart)[:10]
+        if ret and result.candidate.trip_type == "roundtrip":
+            result.candidate.return_date = str(ret)[:10]
+    result.status = "success_flexible"
+    result.message = "Travelpayouts flexible cached latest price returned"
     return result
 
 

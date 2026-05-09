@@ -2,12 +2,12 @@ smtp:
   host: smtp.gmail.com
   port: 587
   use_tls: true
-  username: "hailuwang71@gmail.com"
+  username: "your_email@gmail.com"
 
 email:
-  from: "hailuwang71@gmail.com"
+  from: "your_email@gmail.com"
   to:
-    - "hailuwang71@gmail.com"
+    - "your_email@gmail.com"
   password_env: SMTP_PASSWORD
 
 settings:
@@ -175,6 +175,12 @@ sources:
     market: jp
     max_requests_per_run: 400
     offers_limit: 5
+    flexible_core_fallback: true
+    flexible_global_fallback: true
+    flexible_period_type: month
+    flexible_offers_limit: 10
+    pause_every_requests: 250
+    pause_seconds: 2
     marker: ""
   amadeus:
     enabled: false
