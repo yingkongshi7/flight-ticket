@@ -2,10 +2,14 @@ name: Flight Price Monitor
 
 on:
   schedule:
-    # 23:00 UTC = 08:00 JST next day
+    # 23:00 UTC = 08:00 JST next day: daily core routes
     - cron: "0 23 * * *"
-    # 00:00 UTC Saturday = 09:00 JST Saturday
+    # 23:30 UTC = 08:30 JST next day: daily global routes
+    - cron: "30 23 * * *"
+    # 00:00 UTC Saturday = 09:00 JST Saturday: weekly report
     - cron: "0 0 * * 6"
+    # 00:30 UTC Saturday = 09:30 JST Saturday: weekly domestic routes
+    - cron: "30 0 * * 6"
   workflow_dispatch:
     inputs:
       mode:
@@ -18,6 +22,9 @@ on:
           - global
           - domestic
           - all
+          - core-force
+          - global-force
+          - domestic-force
           - dry-run
 
 jobs:
@@ -52,11 +59,18 @@ jobs:
               global) python flight_price_monitor.py --config flight_price_config.yaml --global-only ;;
               domestic) python flight_price_monitor.py --config flight_price_config.yaml --domestic-only ;;
               all) python flight_price_monitor.py --config flight_price_config.yaml ;;
+              core-force) python flight_price_monitor.py --config flight_price_config.yaml --core-only --force ;;
+              global-force) python flight_price_monitor.py --config flight_price_config.yaml --global-only --force ;;
+              domestic-force) python flight_price_monitor.py --config flight_price_config.yaml --domestic-only --force ;;
               dry-run) python flight_price_monitor.py --config flight_price_config.yaml --core-only --link-only --dry-run ;;
               *) python flight_price_monitor.py --config flight_price_config.yaml --core-only ;;
             esac
-          elif [ "$(date -u +%u)" = "6" ] && [ "$(date -u +%H)" = "00" ]; then
+          elif [ "$(date -u +%u)" = "6" ] && [ "$(date -u +%H:%M)" = "00:00" ]; then
             python flight_price_monitor.py --config flight_price_config.yaml --weekly-report
+          elif [ "$(date -u +%u)" = "6" ] && [ "$(date -u +%H:%M)" = "00:30" ]; then
+            python flight_price_monitor.py --config flight_price_config.yaml --domestic-only
+          elif [ "$(date -u +%H:%M)" = "23:30" ]; then
+            python flight_price_monitor.py --config flight_price_config.yaml --global-only
           else
             python flight_price_monitor.py --config flight_price_config.yaml --core-only
           fi
