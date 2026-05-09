@@ -113,3 +113,9 @@ python flight_price_monitor.py --config flight_price_config.yaml --core-only
 - `core-force`
 - `global-force`
 - `domestic-force`
+
+如果需要测试邮件提醒并临时绕过 7 天重复提醒控制，选择：
+
+- `core-force-alerts`
+- `global-force-alerts`
+- `domestic-force-alerts`

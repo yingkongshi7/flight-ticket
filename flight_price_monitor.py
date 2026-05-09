@@ -801,6 +801,7 @@ def run_scope(args: argparse.Namespace) -> str:
 def build_run_summary(
     candidates: list[SearchCandidate],
     source_results: list[SourceResult],
+    evaluated_alerts: list[dict[str, Any]],
     alerts_to_send: list[dict[str, Any]],
     scope: str,
 ) -> str:
@@ -809,6 +810,8 @@ def build_run_summary(
     priced_count = sum(1 for r in source_results if r.price_jpy is not None)
     manual_count = sum(1 for r in source_results if r.price_jpy is None)
     status_counts = Counter(f"{r.source_name.split(':')[0]}:{r.status}" for r in source_results)
+    alert_candidates = [a for a in evaluated_alerts if a.get("alert_needed")]
+    suppressed_alerts = max(0, len(alert_candidates) - len(alerts_to_send))
     lines = [
         "## Flight Price Monitor Summary",
         "",
@@ -817,6 +820,8 @@ def build_run_summary(
         f"- Source checks / links generated: `{len(source_results)}`",
         f"- Priced results: `{priced_count}`",
         f"- Manual-check links: `{manual_count}`",
+        f"- Alert candidates before dedup: `{len(alert_candidates)}`",
+        f"- Alert candidates suppressed by dedup: `{suppressed_alerts}`",
         f"- Alert emails prepared: `{len(alerts_to_send)}`",
         "",
         "### Categories",
@@ -842,6 +847,22 @@ def build_run_summary(
                 f"- {c.route_name} {c.origin}->{c.destination} {route_dates} "
                 f"{format_price(result.price_jpy)} via {result.source_name} "
                 f"(threshold {format_price(c.threshold_jpy)})"
+            )
+    below_threshold_alerts = sorted(
+        [a for a in evaluated_alerts if a.get("below_threshold") and a["result"].price_jpy is not None],
+        key=lambda a: (a["result"].price_jpy or 10**12, a["result"].candidate.route_name),
+    )
+    if below_threshold_alerts:
+        lines += ["", "### Below-threshold results"]
+        for alert in below_threshold_alerts[:10]:
+            result = alert["result"]
+            c = result.candidate
+            route_dates = f"{c.depart_date}" if not c.return_date else f"{c.depart_date} -> {c.return_date}"
+            dedup_note = "will email" if alert in alerts_to_send else "dedup suppressed"
+            lines.append(
+                f"- {c.route_name} {c.origin}->{c.destination} {route_dates} "
+                f"{format_price(result.price_jpy)} below {format_price(c.threshold_jpy)} "
+                f"via {result.source_name} ({dedup_note})"
             )
     if not alerts_to_send:
         lines += [
@@ -922,6 +943,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--global-only", action="store_true")
     parser.add_argument("--link-only", action="store_true")
     parser.add_argument("--force", action="store_true", help="Run even if this mode already ran today.")
+    parser.add_argument("--force-alerts", action="store_true", help="Bypass alert deduplication for testing.")
     parser.add_argument("--verbose", action="store_true")
     return parser
 
@@ -966,6 +988,7 @@ def main() -> int:
     )
     logging.info("Generated %d candidate searches.", len(candidates))
     alerts_to_send: list[dict[str, Any]] = []
+    evaluated_alerts: list[dict[str, Any]] = []
     source_results: list[SourceResult] = []
 
     for candidate in candidates:
@@ -973,12 +996,15 @@ def main() -> int:
             result = fetch_price_optional(source_result, config, link_only=args.link_only)
             source_results.append(result)
             alert = evaluate_price_alert(result, state, config)
+            evaluated_alerts.append(alert)
             update_state_for_result(state, alert)
-            if deduplicate_alert(alert, state, config):
+            if args.force_alerts and alert["alert_needed"]:
+                alerts_to_send.append(alert)
+            elif deduplicate_alert(alert, state, config):
                 alerts_to_send.append(alert)
 
     logging.info("Prepared %d alert email(s).", len(alerts_to_send))
-    summary = build_run_summary(candidates, source_results, alerts_to_send, scope)
+    summary = build_run_summary(candidates, source_results, evaluated_alerts, alerts_to_send, scope)
     logging.info("\n%s", summary)
     publish_github_step_summary(summary)
     for alert in alerts_to_send:
