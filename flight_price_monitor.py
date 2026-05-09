@@ -829,6 +829,20 @@ def build_run_summary(
     lines += ["", "### Source statuses"]
     for status, count in sorted(status_counts.items()):
         lines.append(f"- {status}: `{count}`")
+    priced_results = sorted(
+        [r for r in source_results if r.price_jpy is not None],
+        key=lambda r: (r.price_jpy or 10**12, r.candidate.route_name, r.candidate.depart_date),
+    )
+    if priced_results:
+        lines += ["", "### Lowest priced results"]
+        for result in priced_results[:10]:
+            c = result.candidate
+            route_dates = f"{c.depart_date}" if not c.return_date else f"{c.depart_date} -> {c.return_date}"
+            lines.append(
+                f"- {c.route_name} {c.origin}->{c.destination} {route_dates} "
+                f"{format_price(result.price_jpy)} via {result.source_name} "
+                f"(threshold {format_price(c.threshold_jpy)})"
+            )
     if not alerts_to_send:
         lines += [
             "",

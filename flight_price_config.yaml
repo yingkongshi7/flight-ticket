@@ -2,12 +2,12 @@ smtp:
   host: smtp.gmail.com
   port: 587
   use_tls: true
-  username: "hailuwang71@gmail.com"
+  username: "your_email@gmail.com"
 
 email:
-  from: "hailuwang71@gmail.com"
+  from: "your_email@gmail.com"
   to:
-    - "hailuwang71@gmail.com"
+    - "your_email@gmail.com"
   password_env: SMTP_PASSWORD
 
 settings:
@@ -173,7 +173,7 @@ sources:
     token_env: TRAVELPAYOUTS_TOKEN
     currency: jpy
     market: jp
-    max_requests_per_run: 80
+    max_requests_per_run: 200
     offers_limit: 5
     marker: ""
   amadeus:
@@ -200,7 +200,7 @@ sources:
     enabled: true
     mode: "link_only"
   airline_official:
-    enabled: true
+    enabled: false
     mode: "link_only"
   playwright_optional:
     enabled: false
