@@ -37,16 +37,16 @@ AMADEUS_TOKEN_CACHE: dict[str, Any] = {}
 AMADEUS_REQUEST_COUNT = 0
 TRAVELPAYOUTS_REQUEST_COUNT = 0
 WEEKLY_GROUPS = [
-    ("Core route: Tokyo-Xian", ["Core China"]),
-    ("China / HK / Taiwan deals", ["China / HK / Taiwan"]),
-    ("Southeast Asia deals", ["Southeast Asia"]),
-    ("Northeast Asia deals", ["Northeast Asia"]),
-    ("Domestic Japan deals", ["Domestic Japan"]),
-    ("Islands / resort deals", ["Islands"]),
-    ("Europe deals", ["Europe"]),
-    ("North America deals", ["North America"]),
-    ("Oceania deals", ["Oceania"]),
-    ("Middle East / Central Asia deals", ["Middle East / Central Asia"]),
+    ("核心路线：东京-西安", ["Core China"]),
+    ("中国大陆 / 港澳台低价", ["China / HK / Taiwan"]),
+    ("东南亚低价", ["Southeast Asia"]),
+    ("东北亚低价", ["Northeast Asia"]),
+    ("日本国内低价", ["Domestic Japan"]),
+    ("海岛 / 度假低价", ["Islands"]),
+    ("欧洲低价", ["Europe"]),
+    ("北美低价", ["North America"]),
+    ("澳洲 / 新西兰低价", ["Oceania"]),
+    ("中东 / 中亚低价", ["Middle East / Central Asia"]),
 ]
 
 
@@ -106,6 +106,9 @@ class SourceResult:
     price_mode: str = "manual"
     original_depart_date: str | None = None
     original_return_date: str | None = None
+    stops: int | None = None
+    stops_status: str = "manual_check_required"
+    filtered_by_stops: bool = False
 
     def __post_init__(self) -> None:
         if self.original_depart_date is None:
@@ -193,6 +196,37 @@ def prune_state(state: dict[str, Any], keep_days: int = 30, dedup_days: int = 7)
 
 def parse_date(value: str) -> dt.date:
     return dt.date.fromisoformat(str(value))
+
+
+def configured_max_stops(config: dict[str, Any]) -> int:
+    settings = config.get("settings", {})
+    if settings.get("direct_only", False):
+        return 0
+    return int(settings.get("max_stops", 1))
+
+
+def allow_unknown_stops(config: dict[str, Any]) -> bool:
+    return bool(config.get("settings", {}).get("allow_unknown_stops", True))
+
+
+def direct_only_enabled(config: dict[str, Any]) -> bool:
+    return configured_max_stops(config) == 0
+
+
+def stop_label(stops: int | None) -> str:
+    if stops is None:
+        return "无法确认"
+    if stops == 0:
+        return "直飞"
+    return f"{stops} 次转机"
+
+
+def stops_status_label(status: str) -> str:
+    return {
+        "confirmed": "已确认",
+        "unknown": "无法确认",
+        "manual_check_required": "需人工确认",
+    }.get(status, status)
 
 
 def add_days(value: dt.date, days: int) -> str:
@@ -291,10 +325,12 @@ def generate_candidate_searches(
     return candidates
 
 
-def build_google_flights_link(c: SearchCandidate) -> str:
+def build_google_flights_link(c: SearchCandidate, config: dict[str, Any] | None = None) -> str:
     q = f"{c.origin} to {c.destination} {c.depart_date}"
     if c.return_date:
         q += f" returning {c.return_date}"
+    if config and direct_only_enabled(config):
+        q += " nonstop"
     return "https://www.google.com/travel/flights?" + urlencode({"q": q, "curr": "JPY"})
 
 
@@ -377,7 +413,7 @@ def build_airline_links(c: SearchCandidate) -> dict[str, str]:
 def build_source_links(c: SearchCandidate, config: dict[str, Any]) -> list[SourceResult]:
     sources = config.get("sources", {})
     builders = {
-        "google_flights": build_google_flights_link,
+        "google_flights": lambda candidate: build_google_flights_link(candidate, config),
         "skyscanner": build_skyscanner_link,
         "trip_com": build_tripcom_link,
         "ctrip": build_ctrip_link,
@@ -428,8 +464,9 @@ def travelpayouts_params(c: SearchCandidate, config: dict[str, Any]) -> dict[str
         "currency": source_cfg.get("currency", "jpy"),
         "departure_at": c.depart_date,
         "one_way": "true" if c.trip_type == "oneway" else "false",
+        "direct": "true" if direct_only_enabled(config) else "false",
         "sorting": "price",
-        "direct": "false",
+        "direct": "true" if direct_only_enabled(config) else "false",
         "limit": int(source_cfg.get("offers_limit", 5)),
         "page": 1,
     }
@@ -439,6 +476,43 @@ def travelpayouts_params(c: SearchCandidate, config: dict[str, Any]) -> dict[str
     if market:
         params["market"] = market
     return params
+
+
+def extract_stops_from_travelpayouts_item(item: dict[str, Any]) -> int | None:
+    for key in ("transfers", "number_of_changes", "stops", "changes"):
+        value = item.get(key)
+        if isinstance(value, bool):
+            continue
+        if isinstance(value, int):
+            return max(0, value)
+        if isinstance(value, str) and value.strip().isdigit():
+            return max(0, int(value.strip()))
+
+    for key in ("segments", "route"):
+        value = item.get(key)
+        if isinstance(value, list) and value:
+            return max(0, len(value) - 1)
+
+    flight_number = item.get("flight_number")
+    if isinstance(flight_number, list) and flight_number:
+        return max(0, len(flight_number) - 1)
+    if isinstance(flight_number, str) and "," in flight_number:
+        parts = [part.strip() for part in flight_number.split(",") if part.strip()]
+        if parts:
+            return max(0, len(parts) - 1)
+
+    airline = item.get("airline")
+    if isinstance(airline, list) and airline:
+        return max(0, len(airline) - 1)
+    return None
+
+
+def stops_allowed_for_item(item: dict[str, Any], config: dict[str, Any]) -> tuple[bool, int | None, str]:
+    stops = extract_stops_from_travelpayouts_item(item)
+    max_stops = configured_max_stops(config)
+    if stops is None:
+        return allow_unknown_stops(config), None, "manual_check_required"
+    return stops <= max_stops, stops, "confirmed"
 
 
 def travelpayouts_get(
@@ -537,28 +611,41 @@ def fetch_travelpayouts_price(result: SourceResult, config: dict[str, Any]) -> S
     if isinstance(data, dict):
         data = list(data.values())
 
-    prices: list[int] = []
+    offers: list[tuple[int, int | None, str]] = []
+    filtered_by_stops = 0
     for item in data:
         if not isinstance(item, dict):
             continue
+        allowed, stops, stops_status = stops_allowed_for_item(item, config)
+        if not allowed:
+            filtered_by_stops += 1
+            continue
         total = item.get("price", item.get("value"))
         try:
-            prices.append(int(round(float(total))))
+            offers.append((int(round(float(total))), stops, stops_status))
         except (TypeError, ValueError):
             continue
 
-    if not prices:
+    if not offers:
         if should_use_travelpayouts_core_fallback(result.candidate, config):
             fallback = fetch_travelpayouts_flexible_price(result, config, token)
             if fallback.price_jpy is not None:
                 fallback.status = "success_core_flexible"
                 fallback.message = "Travelpayouts exact date had no offer; core flexible cached latest price returned"
             return fallback
+        if filtered_by_stops:
+            result.status = "filtered_stops"
+            result.filtered_by_stops = True
+            result.message = f"Travelpayouts offers filtered by max_stops={configured_max_stops(config)}"
+            return result
         result.status = "no_price"
         result.message = "Travelpayouts returned no cached priced offers"
         return result
 
-    result.price_jpy = min(prices)
+    price, stops, stops_status = min(offers, key=lambda item: item[0])
+    result.price_jpy = price
+    result.stops = stops
+    result.stops_status = stops_status
     result.status = "success"
     result.price_mode = "exact_date"
     result.message = "Travelpayouts cached Aviasales price returned"
@@ -630,8 +717,15 @@ def fetch_travelpayouts_flexible_price(result: SourceResult, config: dict[str, A
 
     best: dict[str, Any] | None = None
     best_price: int | None = None
+    best_stops: int | None = None
+    best_stops_status = "manual_check_required"
+    filtered_by_stops = 0
     for item in data:
         if not isinstance(item, dict):
+            continue
+        allowed, stops, stops_status = stops_allowed_for_item(item, config)
+        if not allowed:
+            filtered_by_stops += 1
             continue
         total = item.get("price", item.get("value"))
         try:
@@ -641,13 +735,22 @@ def fetch_travelpayouts_flexible_price(result: SourceResult, config: dict[str, A
         if best_price is None or price < best_price:
             best_price = price
             best = item
+            best_stops = stops
+            best_stops_status = stops_status
 
     if best_price is None:
+        if filtered_by_stops:
+            result.status = "filtered_stops"
+            result.filtered_by_stops = True
+            result.message = f"Travelpayouts flexible offers filtered by max_stops={configured_max_stops(config)}"
+            return result
         result.status = "no_price"
         result.message = "Travelpayouts flexible returned no cached priced offers"
         return result
 
     result.price_jpy = best_price
+    result.stops = best_stops
+    result.stops_status = best_stops_status
     if best:
         depart = best.get("depart_date") or best.get("departure_at")
         ret = best.get("return_date") or best.get("return_at")
@@ -678,10 +781,27 @@ def build_amadeus_api_link(c: SearchCandidate, config: dict[str, Any]) -> str:
         "adults": "1",
         "currencyCode": "JPY",
         "max": "1",
+        "maxStops": str(configured_max_stops(config)),
     }
     if c.return_date:
         params["returnDate"] = c.return_date
     return f"{amadeus_base_url(config)}/v2/shopping/flight-offers?" + urlencode(params)
+
+
+def extract_stops_from_amadeus_offer(offer: dict[str, Any]) -> int | None:
+    itineraries = offer.get("itineraries") or []
+    if not isinstance(itineraries, list) or not itineraries:
+        return None
+    stops: list[int] = []
+    for itinerary in itineraries:
+        if not isinstance(itinerary, dict):
+            continue
+        segments = itinerary.get("segments") or []
+        if isinstance(segments, list) and segments:
+            stops.append(max(0, len(segments) - 1))
+    if not stops:
+        return None
+    return max(stops)
 
 
 def get_amadeus_token(config: dict[str, Any]) -> str | None:
@@ -741,6 +861,7 @@ def fetch_amadeus_price(result: SourceResult, config: dict[str, Any]) -> SourceR
         "adults": "1",
         "currencyCode": "JPY",
         "max": str(source_cfg.get("offers_limit", 3)),
+        "maxStops": str(configured_max_stops(config)),
     }
     if result.candidate.return_date:
         params["returnDate"] = result.candidate.return_date
@@ -769,19 +890,33 @@ def fetch_amadeus_price(result: SourceResult, config: dict[str, Any]) -> SourceR
 
     payload = response.json()
     offers = payload.get("data") or []
-    prices: list[int] = []
+    priced: list[tuple[int, int | None]] = []
+    filtered_by_stops = 0
     for offer in offers:
+        stops = extract_stops_from_amadeus_offer(offer)
+        if stops is not None and stops > configured_max_stops(config):
+            filtered_by_stops += 1
+            continue
         total = (offer.get("price") or {}).get("grandTotal") or (offer.get("price") or {}).get("total")
         try:
-            prices.append(int(round(float(total))))
+            priced.append((int(round(float(total))), stops))
         except (TypeError, ValueError):
             continue
-    if not prices:
+    if not priced:
+        if filtered_by_stops:
+            result.status = "filtered_stops"
+            result.filtered_by_stops = True
+            result.message = f"Amadeus offers filtered by max_stops={configured_max_stops(config)}"
+            return result
         result.status = "no_price"
         result.message = "Amadeus returned no priced offers"
         return result
 
-    result.price_jpy = min(prices)
+    price, stops = min(priced, key=lambda item: item[0])
+    result.price_jpy = price
+    result.stops = stops
+    result.stops_status = "confirmed" if stops is not None else "manual_check_required"
+    result.price_mode = "exact_date"
     result.status = "success"
     result.message = "Amadeus Flight Offers Search returned a price"
     return result
@@ -846,6 +981,8 @@ def evaluate_price_alert(result: SourceResult, state: dict[str, Any], config: di
         "below_threshold": below_threshold,
         "watch_price": watch_price,
         "watch_threshold": watch_threshold,
+        "max_stops": configured_max_stops(config),
+        "allow_unknown_stops": allow_unknown_stops(config),
         "obvious_drop": obvious_drop,
         "abnormal": abnormal,
         "very_cheap": very_cheap,
@@ -911,31 +1048,33 @@ def select_best_alerts_by_group(evaluated_alerts: list[dict[str, Any]]) -> list[
 
 
 def format_price(value: int | None) -> str:
-    return "manual check required" if value is None else f"{value:,} JPY"
+    return "需人工确认" if value is None else f"{value:,}円"
 
 
 def describe_price_mode(result: SourceResult) -> str:
     if result.price_mode == "exact_date":
-        return "exact_date: cached quote for the requested exact date"
+        return "精确日期缓存报价"
     if result.price_mode == "flexible_cached":
-        return "flexible_cached: Travelpayouts cached latest price; dates come from flexible low-price discovery"
-    return "manual: manual confirmation required"
+        return "Travelpayouts flexible cached latest price，日期来自缓存低价发现"
+    return "需人工确认"
 
 
 def build_alert_subject(alert: dict[str, Any]) -> str:
     r: SourceResult = alert["result"]
     c = r.candidate
-    is_strong = alert["below_threshold"] or alert["abnormal"] or alert["focus"]
-    tags = ["\u3010\u673a\u7968\u63d0\u9192\u3011" if is_strong else "\u3010\u673a\u7968\u89c2\u5bdf\u3011"]
-    if alert["focus"]:
-        tags.append("\u3010\u91cd\u70b9\u3011")
-    if alert["abnormal"]:
-        tags.append("\u3010\u5f02\u5e38\u4f4e\u4ef7\u3011")
     route = c.route_name.replace("Tokyo-", "Tokyo-")
-    trip_label = "oneway" if c.trip_type == "oneway" else "roundtrip"
-    if alert["obvious_drop"] and not alert["below_threshold"] and not alert["watch_price"]:
-        return f"{''.join(tags)}{route} {c.window_label} drop {alert['drop_pct']}% | current {format_price(r.price_jpy)}"
-    return f"{''.join(tags)}{route} {c.window_label if c.window_key != 'normal' else ''} {trip_label} {format_price(r.price_jpy)}".replace("  ", " ").strip()
+    date_part = c.depart_date
+    if alert["abnormal"]:
+        return f"【异常低价】{route}｜{format_price(r.price_jpy)}｜{date_part}"
+    if alert["below_threshold"]:
+        return f"【机票提醒】{route} 低于目标价｜{format_price(r.price_jpy)}｜{date_part}"
+    if alert["focus"]:
+        return f"【重点关注】{route} 节假日核心路线｜{format_price(r.price_jpy)}｜{date_part}"
+    if alert["obvious_drop"]:
+        return f"【机票降价】{route} 降价 {alert['drop_pct']}%｜{format_price(r.price_jpy)}｜{date_part}"
+    if alert["watch_price"]:
+        return f"【机票观察】{route} 接近目标价｜{format_price(r.price_jpy)}｜{date_part}"
+    return f"【机票提醒】{route}｜{format_price(r.price_jpy)}｜{date_part}"
 
 
 def build_alert_email(alert: dict[str, Any]) -> tuple[str, str, str]:
@@ -944,65 +1083,80 @@ def build_alert_email(alert: dict[str, Any]) -> tuple[str, str, str]:
     subject = build_alert_subject(alert)
     actions = []
     if alert["below_threshold"]:
-        actions.append("Price is below the target threshold. Confirm manually as soon as practical.")
+        actions.append("价格低于目标价，建议尽快人工确认最终价格、行李、税费、退改签和转机时间。")
     if alert["watch_price"] and not alert["below_threshold"]:
-        actions.append("Price is near the target range. Add it to the watch list and manually confirm baggage, taxes, and schedule; avoid impulse purchase decisions.")
+        actions.append("价格接近目标价，建议加入观察名单，并对比 Google Flights、航司官网和 Trip.com。")
     if alert["obvious_drop"] and not alert["below_threshold"] and not alert["watch_price"]:
-        actions.append("Price dropped significantly but is still above the ideal threshold. Continue watching.")
+        actions.append("价格明显下降，但仍未低于理想阈值，可继续观察。")
     if alert["holiday_core"]:
-        actions.append("Holiday core route: prioritize checking baggage, connection time, and change/refund rules.")
+        actions.append("节假日核心路线，建议优先确认行李、转机时间和退改签规则。")
+    if alert["abnormal"]:
+        actions.append("异常低价，优先确认是否含税费、是否有长转机、是否为不可退改票。")
     if r.price_mode == "flexible_cached":
-        actions.append("Flexible cached discovery result: final price and flight conditions must be manually confirmed.")
+        actions.append("这是缓存低价发现，不是实时出票价，最终价格和航班条件必须人工确认。")
     if not actions:
-        actions.append("Manually confirm final price and flight conditions.")
+        actions.append("建议人工确认最终价格与航班条件。")
 
     lines = [
-        f"Route: {c.route_name}",
-        f"destination_category: {c.destination_category}",
-        f"Origin airport: {c.origin}",
-        f"Destination airport: {c.destination}",
-        f"Departure date: {c.depart_date}",
-        f"Return date: {c.return_date or '-'}",
-        f"Trip type: {'oneway' if c.trip_type == 'oneway' else 'roundtrip'}",
-        f"Current price: {format_price(r.price_jpy)}",
-        f"Previous price: {format_price(alert['previous_price'])}",
-        f"Historical low: {format_price(alert['history_low'])}",
-        f"Drop pct: {alert['drop_pct'] if alert['drop_pct'] is not None else '-'}%",
-        f"Source: {r.source_name}",
-        f"Price mode: {describe_price_mode(r)}",
-        f"Query link: {r.query_link}",
-        f"Below threshold: {alert['below_threshold']}",
-        f"Watch price: {alert['watch_price']}",
-        f"Watch threshold: {format_price(alert['watch_threshold'])}",
-        f"Obvious drop: {alert['obvious_drop']}",
-        f"Abnormal low price: {alert['abnormal']}",
-        f"Holiday core route: {alert['holiday_core']}",
+        "路线信息",
+        f"- 路线名称：{c.route_name}",
+        f"- 出发机场：{c.origin}",
+        f"- 到达机场：{c.destination}",
+        f"- 出发日期：{c.depart_date}",
+        f"- 返回日期：{c.return_date or '-'}",
+        f"- 单程/往返：{'单程' if c.trip_type == 'oneway' else '往返'}",
+        f"- 目的地分类：{c.destination_category}",
+        "",
+        "价格信息",
+        f"- 当前价格：{format_price(r.price_jpy)}",
+        f"- 目标价：{format_price(c.threshold_jpy)}",
+        f"- 观察价阈值：{format_price(alert['watch_threshold'])}",
+        f"- 上次价格：{format_price(alert['previous_price'])}",
+        f"- 历史最低价：{format_price(alert['history_low'])}",
+        f"- 降价幅度：{alert['drop_pct'] if alert['drop_pct'] is not None else '-'}%",
+        f"- 价格模式：{describe_price_mode(r)}",
+        f"- 平台：{r.source_name}",
+        f"- 查询链接：{r.query_link}",
+        "",
+        "转机限制",
+        f"- 配置要求：最多 {alert['max_stops']} 次转机",
+        f"- API 返回转机次数：{stop_label(r.stops)}",
+        f"- 转机判断状态：{stops_status_label(r.stops_status)}",
+        "- 备注：如果转机次数无法确认，请人工检查航班详情。",
+        "",
+        "触发原因",
+        f"- 低于目标价：{alert['below_threshold']}",
+        f"- 接近目标价：{alert['watch_price']}",
+        f"- 明显降价：{alert['obvious_drop']}",
+        f"- 异常低价：{alert['abnormal']}",
+        f"- 节假日核心路线：{alert['holiday_core']}",
     ]
     if r.price_mode == "flexible_cached":
         lines.extend([
-            f"Original candidate departure date: {r.original_depart_date or '-'}",
-            f"Original candidate return date: {r.original_return_date or '-'}",
-            f"Actual cached low-price departure date: {c.depart_date}",
-            f"Actual cached low-price return date: {c.return_date or '-'}",
-            "Reminder: this price is for low-price discovery; final price and conditions must be manually confirmed.",
+            f"- 原始候选出发日期：{r.original_depart_date or '-'}",
+            f"- 原始候选返回日期：{r.original_return_date or '-'}",
+            f"- 实际缓存低价出发日期：{c.depart_date}",
+            f"- 实际缓存低价返回日期：{c.return_date or '-'}",
+            "- 提醒：此价格适合发现低价机会，最终价格和航班条件必须人工确认。",
         ])
     lines.extend([
         "",
-        "Suggested action:",
+        "建议动作",
         *[f"- {a}" for a in actions],
         "",
-        "Notes:",
-        "- Manually confirm taxes, checked baggage, transfers, and red-eye flights.",
-        "- Confirm visa or transit visa requirements.",
-        "- China platform prices may require manual final tax-inclusive confirmation.",
-        "- This script does not book, store payment data, or bypass CAPTCHAs.",
+        "注意事项",
+        "- 本脚本不会自动下单。",
+        "- 本脚本不会保存支付信息。",
+        "- 本脚本不会登录网站或绕过验证码。",
+        "- Travelpayouts 返回的是缓存价格，最终价格以人工打开链接确认结果为准。",
+        "- Google Flights / Skyscanner / Trip.com / 携程 / 飞猪链接仅用于人工确认，转机次数、行李、税费和最终价格需要手动检查。",
     ])
     html_body = "<br>".join(html.escape(line) for line in lines).replace(html.escape(r.query_link), f'<a href="{html.escape(r.query_link)}">{html.escape(r.query_link)}</a>')
     return subject, "\n".join(lines), html_body
 
 
 def build_weekly_report_email(state: dict[str, Any], config: dict[str, Any]) -> tuple[str, str, str]:
-    subject = "flight_price_weekly_report | Flight price weekly report"
+    subject = "【机票周报】低价路线与人工确认链接"
     latest_prices = state.get("latest_prices", {})
     manual_links = state.get("manual_check_links", [])
     drops = sorted(state.get("weekly_drops", []), key=lambda x: x.get("drop_pct", 0), reverse=True)[:5]
@@ -1016,29 +1170,32 @@ def build_weekly_report_email(state: dict[str, Any], config: dict[str, Any]) -> 
         rows = sorted(rows, key=lambda x: x.get("price_jpy", 10**12))[:5]
         sections += [f"## {title}"]
         if not rows:
-            sections.append("- No priced results yet.")
+            sections.append("- 暂无可用抓价结果。")
         for item in rows:
             mode = item.get("price_mode", "unknown")
+            stops = stop_label(item.get("stops"))
+            stops_status = stops_status_label(item.get("stops_status", "manual_check_required"))
             sections.append(
                 f"- {item['route_name']} {item['depart_date']}~{item.get('return_date') or '-'} "
                 f"{format_price(item.get('price_jpy'))} {item['source_name']} [{mode}] "
-                f"below_threshold={item.get('below_threshold')} watch_price={item.get('watch_price')} "
-                f"obvious_drop={item.get('obvious_drop')} abnormal={item.get('abnormal')} "
+                f"转机={stops} 转机状态={stops_status} "
+                f"低于目标价={item.get('below_threshold')} 观察价={item.get('watch_price')} "
+                f"明显降价={item.get('obvious_drop')} 异常低价={item.get('abnormal')} "
                 f"{item.get('query_link')}"
             )
         sections.append("")
 
-    sections += ["## Biggest drops in the last week"]
+    sections += ["## 最近一周降价最多的路线"]
     if not drops:
-        sections.append("- No drop records yet.")
+        sections.append("- 暂无降价记录。")
     for item in drops:
-        sections.append(f"- {item.get('route_name')} {item.get('drop_pct')}% current {format_price(item.get('price_jpy'))} {item.get('query_link')}")
+        sections.append(f"- {item.get('route_name')} 降价 {item.get('drop_pct')}% 当前 {format_price(item.get('price_jpy'))} {item.get('query_link')}")
 
-    sections += ["", "## Manual-confirmation links"]
+    sections += ["", "## 需要人工确认的路线链接", "以下链接不会自动抓价，需要人工确认价格、转机次数、行李和税费。"]
     for item in manual_links[-50:]:
         sections.append(f"- {item.get('route_name')} {item.get('source_name')} {item.get('depart_date')} {item.get('query_link')}")
     if not manual_links:
-        sections.append("- None.")
+        sections.append("- 暂无。")
 
     text = "\n".join(sections)
     html_body = "<br>".join(html.escape(line) for line in sections)
@@ -1093,6 +1250,10 @@ def build_run_summary(
     priced_count = sum(1 for r in source_results if r.price_jpy is not None)
     manual_count = sum(1 for r in source_results if r.price_jpy is None)
     status_counts = Counter(f"{r.source_name.split(':')[0]}:{r.status}" for r in source_results)
+    nonstop_count = sum(1 for r in source_results if r.stops == 0 and r.stops_status == "confirmed" and r.price_jpy is not None)
+    one_stop_count = sum(1 for r in source_results if r.stops == 1 and r.stops_status == "confirmed" and r.price_jpy is not None)
+    unknown_stops_count = sum(1 for r in source_results if r.stops is None and r.price_jpy is not None)
+    filtered_stops_count = sum(1 for r in source_results if r.status == "filtered_stops" or r.filtered_by_stops)
     alert_candidates = [a for a in evaluated_alerts if a.get("alert_needed")]
     watch_candidates = [a for a in evaluated_alerts if a.get("watch_price")]
     watch_emails = [a for a in alerts_to_send if a.get("watch_price")]
@@ -1121,6 +1282,17 @@ def build_run_summary(
     ]
     for category, count in sorted(category_counts.items()):
         lines.append(f"- {category}: `{count}`")
+    lines += [
+        "",
+        "### Stop filtering",
+        f"- Max stops configured: `{configured_max_stops(config)}`",
+        f"- Allow unknown stops: `{str(allow_unknown_stops(config)).lower()}`",
+        f"- Confirmed nonstop results: `{nonstop_count}`",
+        f"- Confirmed one-stop results: `{one_stop_count}`",
+        f"- Unknown stops results: `{unknown_stops_count}`",
+        f"- Filtered by max stops: `{filtered_stops_count}`",
+        "- Manual-link stops status: `manual_check_required`",
+    ]
     lines += ["", "### Sources"]
     for source, count in sorted(source_counts.items()):
         lines.append(f"- {source}: `{count}`")
@@ -1132,7 +1304,7 @@ def build_run_summary(
         lines.append(f"- {reason}: `{reason_counts.get(reason, 0)}`")
     examples: dict[str, str] = {}
     for result in source_results:
-        if result.source_name == "travelpayouts" and result.status in {"no_price", "rate_limited", "failed", "skipped"} and result.status not in examples:
+        if result.source_name == "travelpayouts" and result.status in {"no_price", "rate_limited", "failed", "skipped", "filtered_stops"} and result.status not in examples:
             examples[result.status] = result.message
     if examples:
         lines += ["", "### Travelpayouts status examples"]
@@ -1157,7 +1329,7 @@ def build_run_summary(
             lines.append(
                 f"- {c.route_name} {c.origin}->{c.destination} {route_dates} "
                 f"{format_price(result.price_jpy)} via {result.source_name} [{result.price_mode}] "
-                f"({price_status}, threshold {format_price(c.threshold_jpy)}, watch {format_price(watch_threshold)})"
+                f"({price_status}, threshold {format_price(c.threshold_jpy)}, watch {format_price(watch_threshold)}, stops {stop_label(result.stops)} / {stops_status_label(result.stops_status)})"
             )
     below_threshold_alerts = sorted(
         [a for a in evaluated_alerts if a.get("below_threshold") and a["result"].price_jpy is not None],
@@ -1261,6 +1433,8 @@ def update_state_for_result(state: dict[str, Any], alert: dict[str, Any]) -> Non
                 "query_link": result.query_link,
                 "price_mode": result.price_mode,
                 "message": result.message,
+                "stops": result.stops,
+                "stops_status": result.stops_status,
             }
         )
         return
@@ -1282,6 +1456,8 @@ def update_state_for_result(state: dict[str, Any], alert: dict[str, Any]) -> Non
         "price_mode": result.price_mode,
         "original_depart_date": result.original_depart_date,
         "original_return_date": result.original_return_date,
+        "stops": result.stops,
+        "stops_status": result.stops_status,
         "below_threshold": alert["below_threshold"],
         "watch_price": alert["watch_price"],
         "watch_threshold": alert["watch_threshold"],
@@ -1327,8 +1503,8 @@ def main() -> int:
     scope = run_scope(args)
 
     if args.test_email:
-        subject = "机票监控测试邮件"
-        text = "这是一封 SMTP 测试邮件。脚本不会自动下单、不会保存支付信息。"
+        subject = "【机票监控】SMTP 测试邮件"
+        text = "这是一封 SMTP 测试邮件。脚本不会自动下单、不会保存支付信息、不会登录网站或绕过验证码。"
         if dry_run:
             print(subject)
             print(text)

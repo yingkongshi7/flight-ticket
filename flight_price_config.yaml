@@ -2,12 +2,12 @@ smtp:
   host: smtp.gmail.com
   port: 587
   use_tls: true
-  username: "hailuwang71@gmail.com"
+  username: "your_email@gmail.com"
 
 email:
-  from: "hailuwang71@gmail.com"
+  from: "your_email@gmail.com"
   to:
-    - "hailuwang71@gmail.com"
+    - "your_email@gmail.com"
   password_env: SMTP_PASSWORD
 
 settings:
@@ -20,6 +20,9 @@ settings:
   watch_price_alert_enabled: true
   watch_price_margin_pct: 25
   state_keep_days: 30
+  max_stops: 1
+  direct_only: false
+  allow_unknown_stops: true
   dry_run_default: false
 
 core_routes:
