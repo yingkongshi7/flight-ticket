@@ -2,12 +2,12 @@ smtp:
   host: smtp.gmail.com
   port: 587
   use_tls: true
-  username: "hailuwang71@gmail.com"
+  username: "your_email@gmail.com"
 
 email:
-  from: "hailuwang71@gmail.com"
+  from: "your_email@gmail.com"
   to:
-    - "hailuwang71@gmail.com"
+    - "your_email@gmail.com"
   password_env: SMTP_PASSWORD
 
 settings:
@@ -17,6 +17,9 @@ settings:
   significant_drop_repeat_pct: 10
   abnormal_discount_pct: 20
   user_agent: "Mozilla/5.0 FlightPriceMonitor/1.0"
+  watch_price_alert_enabled: true
+  watch_price_margin_pct: 25
+  state_keep_days: 30
   dry_run_default: false
 
 core_routes:
@@ -173,14 +176,16 @@ sources:
     token_env: TRAVELPAYOUTS_TOKEN
     currency: jpy
     market: jp
-    max_requests_per_run: 400
+    max_requests_per_run: 300
     offers_limit: 5
     flexible_core_fallback: true
     flexible_global_fallback: true
     flexible_period_type: month
     flexible_offers_limit: 10
-    pause_every_requests: 250
-    pause_seconds: 2
+    pause_every_requests: 80
+    pause_seconds: 5
+    retry_attempts: 3
+    retry_base_sleep_seconds: 2
     marker: ""
   amadeus:
     enabled: false

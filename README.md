@@ -1,10 +1,10 @@
 # Flight Price Monitor
 
-安全优先的 Python 3 机票价格监控脚本，适合放在 GitHub Actions 每天运行一次。
+安全优先的 Python 3 机票价格监控脚本，适合放在 GitHub Actions 定时运行。
 
-默认行为是生成 Google Flights、Skyscanner、Trip.com、携程、飞猪、航空公司官网的查询链接，并把不能稳定抓取价格的平台标记为“需人工确认”。脚本不会自动下单、不会保存支付信息、不会登录、不会绕过验证码，也不会高频请求。
+脚本不会自动下单、不会保存支付信息、不会登录网站、不会绕过验证码，也不会高频请求。Google Flights、Skyscanner、Trip.com、携程、飞猪继续作为人工确认链接；真实自动价格数据主要来自 Travelpayouts / Aviasales Data API 的缓存价格。Amadeus 保留为可选源，默认关闭。
 
-## 本地运行
+## 运行方式
 
 ```bash
 pip install -r requirements.txt
@@ -12,116 +12,126 @@ python flight_price_monitor.py --config flight_price_config.yaml --dry-run --cor
 python flight_price_monitor.py --config flight_price_config.yaml --weekly-report --dry-run
 ```
 
-## Gmail SMTP 环境变量
+## GitHub Secrets
 
-建议使用 Gmail App Password，不要使用主密码。
+在仓库 `Settings -> Secrets and variables -> Actions -> Repository secrets` 中设置：
 
-Linux / macOS:
+- `SMTP_PASSWORD`: Gmail App Password，用于发送邮件。
+- `TRAVELPAYOUTS_TOKEN`: Travelpayouts / Aviasales Data API token。
 
-```bash
-export SMTP_PASSWORD="your_gmail_app_password"
-```
-
-Windows PowerShell:
-
-```powershell
-$env:SMTP_PASSWORD="your_gmail_app_password"
-```
-
-GitHub Actions:
-
-1. 进入仓库 `Settings`。
-2. 打开 `Secrets and variables` -> `Actions`。
-3. 新增 secret：`SMTP_PASSWORD`。
-4. 如需真实价格查询，新增 Travelpayouts secret：`TRAVELPAYOUTS_TOKEN`。
-5. 如需持久化 `flight_price_state.json`，建议把 state 提交到私有仓库，或改用 artifact/cache/外部存储。
-
-## Travelpayouts / Aviasales 真实价格源
-
-`flight_price_config.yaml` 默认启用 `travelpayouts` API source，并限制每次最多 80 个请求：
-
-```yaml
-sources:
-  travelpayouts:
-    enabled: true
-    mode: "api"
-    token_env: TRAVELPAYOUTS_TOKEN
-    currency: jpy
-    market: jp
-    max_requests_per_run: 80
-```
-
-需要在 Travelpayouts 账户里获取 Data API token，然后放入 GitHub Actions Secrets：
-
-- `TRAVELPAYOUTS_TOKEN`
-
-本地测试：
-
-```bash
-export TRAVELPAYOUTS_TOKEN="your_token"
-python flight_price_monitor.py --config flight_price_config.yaml --core-only
-```
-
-Windows PowerShell：
-
-```powershell
-$env:TRAVELPAYOUTS_TOKEN="your_token"
-python flight_price_monitor.py --config flight_price_config.yaml --core-only
-```
-
-注意：Travelpayouts / Aviasales Data API 返回的是缓存数据，通常来自最近用户搜索数据，适合每天监控低价趋势，不适合强实时出票。查不到价格时脚本会保留人工确认链接。
-
-当前策略：
-
-- `domestic` 使用精确日期 `prices_for_dates`。
-- `core` 先使用精确日期 `prices_for_dates`，没有报价时 fallback 到 `get_latest_prices` 缓存低价发现模式，并保留人工确认链接。
-- `global` 使用更宽松的 `get_latest_prices` 缓存低价发现模式，更适合发现全球便宜机会。
-
-## Amadeus 可选源
-
-如果以后恢复使用 Amadeus，可把 `flight_price_config.yaml` 里的 `sources.amadeus.enabled` 改为 `true`，并设置 GitHub Secrets：
+可选：
 
 - `AMADEUS_CLIENT_ID`
 - `AMADEUS_CLIENT_SECRET`
 
-## Cron 示例
+## 当前监控策略
 
-服务器时区如果是日本时间：
+当前配置中的 Travelpayouts 请求上限是：
 
-```cron
-# 每天日本时间早上 8 点运行核心路线
-0 8 * * * cd /path/to/repo && /usr/bin/python3 flight_price_monitor.py --config flight_price_config.yaml --core-only
-
-# 每周六日本时间早上 9 点发送周报
-0 9 * * 6 cd /path/to/repo && /usr/bin/python3 flight_price_monitor.py --config flight_price_config.yaml --weekly-report
+```yaml
+sources:
+  travelpayouts:
+    max_requests_per_run: 300
+    pause_every_requests: 80
+    pause_seconds: 5
+    retry_attempts: 3
+    retry_base_sleep_seconds: 2
 ```
 
-服务器时区如果是 UTC，日本时间 08:00 = UTC 23:00 前一日，日本时间周六 09:00 = UTC 周六 00:00：
+大致候选数量：
 
-```cron
-0 23 * * * cd /path/to/repo && /usr/bin/python3 flight_price_monitor.py --config flight_price_config.yaml --core-only
-0 0 * * 6 cd /path/to/repo && /usr/bin/python3 flight_price_monitor.py --config flight_price_config.yaml --weekly-report
+- `core-only`: 48
+- `domestic-only`: 144
+- `global-only`: 352
+- `all`: 544
+
+建议日常分开运行，不建议把 `all` 作为每天自动任务，因为全量候选较多。
+
+价格模式：
+
+- `domestic`: 使用 Travelpayouts `prices_for_dates`，即精确日期缓存报价。
+- `core`: 先用 `prices_for_dates` 查精确日期；没有报价时 fallback 到 `get_latest_prices` flexible cached low-price。
+- `global`: 使用 `get_latest_prices` flexible cached latest price，适合发现低价机会，不代表精确日期实时价格。
+- `manual`: Google Flights / Trip.com / 携程 / 飞猪 / Skyscanner 等人工确认链接。
+
+Travelpayouts 返回的是缓存数据，不保证实时，不保证最终含税价，也不保证包含托运行李。最终价格、税费、行李、转机、退改签、签证要求都必须人工确认。
+
+## 提醒规则
+
+强提醒：
+
+- 低于路线阈值。
+- 明显降价。
+- 异常低价。
+- 东京-西安节假日重点低价。
+
+观察提醒：
+
+```yaml
+settings:
+  watch_price_alert_enabled: true
+  watch_price_margin_pct: 25
 ```
+
+如果价格没有低于理想阈值，但在 `threshold_jpy * 1.25` 内，会发送 `【机票观察】`。观察提醒会参与去重，避免每天重复提醒。
+
+如果 `Priced results > 0` 但 `Alert emails prepared = 0`，通常说明价格没有达到 threshold/watch threshold/drop 规则，或被 7 天去重抑制。
+
+如果出现 `rate_limited`，建议降低 `max_requests_per_run`、增大 `pause_seconds`，或继续分批运行。
 
 ## GitHub Actions
 
-已提供 `.github/workflows/flight-price-monitor.yml`。它使用 UTC cron：
+`.github/workflows/flight-price-monitor.yml` 使用 UTC cron：
 
 - `23:00 UTC` = 日本时间次日 `08:00`，每天运行核心路线。
 - `23:30 UTC` = 日本时间次日 `08:30`，每天运行全球路线。
 - `00:00 UTC Saturday` = 日本时间周六 `09:00`，发送周报。
 - `00:30 UTC Saturday` = 日本时间周六 `09:30`，每周运行日本国内路线。
 
-手动运行时可在 Actions 页面选择 `workflow_dispatch`。
-
-手动测试同一天重复运行时，选择：
+手动测试同一天重复运行：
 
 - `core-force`
 - `global-force`
 - `domestic-force`
 
-如果需要测试邮件提醒并临时绕过 7 天重复提醒控制，选择：
+测试邮件并临时绕过 7 天重复提醒：
 
 - `core-force-alerts`
 - `global-force-alerts`
 - `domestic-force-alerts`
+
+## 本地环境变量
+
+Linux / macOS:
+
+```bash
+export SMTP_PASSWORD="your_gmail_app_password"
+export TRAVELPAYOUTS_TOKEN="your_token"
+```
+
+Windows PowerShell:
+
+```powershell
+$env:SMTP_PASSWORD="your_gmail_app_password"
+$env:TRAVELPAYOUTS_TOKEN="your_token"
+```
+
+## Cron 示例
+
+如果服务器时区是日本时间：
+
+```cron
+0 8 * * * cd /path/to/repo && /usr/bin/python3 flight_price_monitor.py --config flight_price_config.yaml --core-only
+30 8 * * * cd /path/to/repo && /usr/bin/python3 flight_price_monitor.py --config flight_price_config.yaml --global-only
+0 9 * * 6 cd /path/to/repo && /usr/bin/python3 flight_price_monitor.py --config flight_price_config.yaml --weekly-report
+30 9 * * 6 cd /path/to/repo && /usr/bin/python3 flight_price_monitor.py --config flight_price_config.yaml --domestic-only
+```
+
+## 安全边界
+
+- 不自动下单。
+- 不保存支付信息。
+- 不登录网站。
+- 不绕过 CAPTCHA。
+- 不模拟购买。
+- 不高频请求 Google Flights / Skyscanner / 携程 / 飞猪等网页。
