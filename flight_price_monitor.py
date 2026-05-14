@@ -50,6 +50,281 @@ WEEKLY_GROUPS = [
 ]
 
 
+CATEGORY_LABELS_ZH = {
+    "Core China": "核心路线 / 中国大陆",
+    "China / HK / Taiwan": "中国大陆 / 港澳台",
+    "Southeast Asia": "东南亚",
+    "Northeast Asia": "东北亚",
+    "Domestic Japan": "日本国内",
+    "Islands": "海岛 / 度假",
+    "Europe": "欧洲",
+    "North America": "北美",
+    "Oceania": "澳洲 / 新西兰",
+    "Middle East / Central Asia": "中东 / 中亚",
+}
+
+AIRPORT_LABELS_ZH = {
+    "TYO": "东京全部机场",
+    "HND": "东京羽田",
+    "NRT": "东京成田",
+    "XIY": "西安",
+    "CTS": "札幌 / 新千岁",
+    "OKA": "冲绳 / 那霸",
+    "FUK": "福冈",
+    "KMJ": "熊本",
+    "KOJ": "鹿儿岛",
+    "NGS": "长崎",
+    "KMI": "宫崎",
+    "OIT": "大分",
+    "KKJ": "北九州",
+    "ISG": "石垣岛",
+    "MMY": "宫古岛",
+    "ASJ": "奄美大岛",
+    "ICN": "首尔 / 仁川",
+    "GMP": "首尔 / 金浦",
+    "PUS": "釜山",
+    "CJU": "济州",
+    "UBN": "乌兰巴托",
+    "PVG": "上海 / 浦东",
+    "SHA": "上海 / 虹桥",
+    "PEK": "北京 / 首都",
+    "PKX": "北京 / 大兴",
+    "DLC": "大连",
+    "TAO": "青岛",
+    "NKG": "南京",
+    "HGH": "杭州",
+    "CAN": "广州",
+    "SZX": "深圳",
+    "TFU": "成都 / 天府",
+    "CTU": "成都 / 双流",
+    "CKG": "重庆",
+    "XMN": "厦门",
+    "FOC": "福州",
+    "WUH": "武汉",
+    "HKG": "香港",
+    "MFM": "澳门",
+    "TPE": "台北 / 桃园",
+    "TSA": "台北 / 松山",
+    "KHH": "高雄",
+    "BKK": "曼谷 / 素万那普",
+    "DMK": "曼谷 / 廊曼",
+    "SIN": "新加坡",
+    "KUL": "吉隆坡",
+    "MNL": "马尼拉",
+    "CEB": "宿务",
+    "HAN": "河内",
+    "SGN": "胡志明市",
+    "DAD": "岘港",
+    "CGK": "雅加达",
+    "DPS": "巴厘岛",
+    "PNH": "金边",
+    "SAI": "暹粒",
+    "HNL": "檀香山",
+    "GUM": "关岛",
+    "SPN": "塞班",
+    "ROR": "帕劳",
+    "HKT": "普吉岛",
+    "MLE": "马累 / 马尔代夫",
+    "PPT": "大溪地 / 帕皮提",
+    "LHR": "伦敦 / 希思罗",
+    "CDG": "巴黎 / 戴高乐",
+    "FRA": "法兰克福",
+    "MUC": "慕尼黑",
+    "AMS": "阿姆斯特丹",
+    "FCO": "罗马",
+    "MXP": "米兰",
+    "BCN": "巴塞罗那",
+    "MAD": "马德里",
+    "ZRH": "苏黎世",
+    "VIE": "维也纳",
+    "IST": "伊斯坦布尔",
+    "HEL": "赫尔辛基",
+    "CPH": "哥本哈根",
+    "PRG": "布拉格",
+    "BUD": "布达佩斯",
+    "WAW": "华沙",
+    "ATH": "雅典",
+    "LAX": "洛杉矶",
+    "SFO": "旧金山",
+    "SEA": "西雅图",
+    "YVR": "温哥华",
+    "JFK": "纽约 / 肯尼迪",
+    "EWR": "纽约 / 纽瓦克",
+    "YYZ": "多伦多",
+    "ORD": "芝加哥",
+    "LAS": "拉斯维加斯",
+    "SYD": "悉尼",
+    "MEL": "墨尔本",
+    "BNE": "布里斯班",
+    "PER": "珀斯",
+    "AKL": "奥克兰",
+    "CHC": "基督城",
+    "DXB": "迪拜",
+    "AUH": "阿布扎比",
+    "DOH": "多哈",
+    "TAS": "塔什干",
+    "ALA": "阿拉木图",
+}
+
+ROUTE_SUFFIX_LABELS_ZH = {
+    "Xian": "西安",
+    "Sapporo": "札幌",
+    "Okinawa": "冲绳",
+    "Fukuoka": "福冈",
+    "Kumamoto": "熊本",
+    "Kagoshima": "鹿儿岛",
+    "Nagasaki": "长崎",
+    "Miyazaki": "宫崎",
+    "Oita": "大分",
+    "Kitakyushu": "北九州",
+    "Ishigaki": "石垣岛",
+    "Miyakojima": "宫古岛",
+    "Amami": "奄美大岛",
+    "Seoul": "首尔",
+    "Busan": "釜山",
+    "Jeju": "济州",
+    "Ulaanbaatar": "乌兰巴托",
+    "Shanghai": "上海",
+    "Beijing": "北京",
+    "Dalian": "大连",
+    "Qingdao": "青岛",
+    "Nanjing": "南京",
+    "Hangzhou": "杭州",
+    "Guangzhou": "广州",
+    "Shenzhen": "深圳",
+    "Chengdu": "成都",
+    "Chongqing": "重庆",
+    "Xiamen": "厦门",
+    "Fuzhou": "福州",
+    "Wuhan": "武汉",
+    "HongKong": "香港",
+    "Macau": "澳门",
+    "Taipei": "台北",
+    "Kaohsiung": "高雄",
+    "Bangkok": "曼谷",
+    "Singapore": "新加坡",
+    "KualaLumpur": "吉隆坡",
+    "Manila": "马尼拉",
+    "Cebu": "宿务",
+    "Hanoi": "河内",
+    "HoChiMinh": "胡志明市",
+    "DaNang": "岘港",
+    "Jakarta": "雅加达",
+    "Bali": "巴厘岛",
+    "PhnomPenh": "金边",
+    "SiemReap": "暹粒",
+    "Honolulu": "檀香山",
+    "Guam": "关岛",
+    "Saipan": "塞班",
+    "Palau": "帕劳",
+    "Phuket": "普吉岛",
+    "Maldives": "马尔代夫",
+    "Tahiti": "大溪地",
+    "London": "伦敦",
+    "Paris": "巴黎",
+    "Frankfurt": "法兰克福",
+    "Munich": "慕尼黑",
+    "Amsterdam": "阿姆斯特丹",
+    "Rome": "罗马",
+    "Milan": "米兰",
+    "Barcelona": "巴塞罗那",
+    "Madrid": "马德里",
+    "Zurich": "苏黎世",
+    "Vienna": "维也纳",
+    "Istanbul": "伊斯坦布尔",
+    "Helsinki": "赫尔辛基",
+    "Copenhagen": "哥本哈根",
+    "Prague": "布拉格",
+    "Budapest": "布达佩斯",
+    "Warsaw": "华沙",
+    "Athens": "雅典",
+    "LosAngeles": "洛杉矶",
+    "SanFrancisco": "旧金山",
+    "Seattle": "西雅图",
+    "Vancouver": "温哥华",
+    "NewYork": "纽约",
+    "Toronto": "多伦多",
+    "Chicago": "芝加哥",
+    "LasVegas": "拉斯维加斯",
+    "Sydney": "悉尼",
+    "Melbourne": "墨尔本",
+    "Brisbane": "布里斯班",
+    "Perth": "珀斯",
+    "Auckland": "奥克兰",
+    "Christchurch": "基督城",
+    "Dubai": "迪拜",
+    "AbuDhabi": "阿布扎比",
+    "Doha": "多哈",
+    "Tashkent": "塔什干",
+    "Almaty": "阿拉木图",
+}
+
+SOURCE_LABELS_ZH = {
+    "travelpayouts": "Travelpayouts / Aviasales 缓存价",
+    "amadeus": "Amadeus 实时报价",
+    "google_flights": "Google Flights 人工确认链接",
+    "skyscanner": "Skyscanner 人工确认链接",
+    "trip_com": "Trip.com 人工确认链接",
+    "ctrip": "携程人工确认链接",
+    "fliggy": "飞猪人工确认链接",
+    "airline_official": "航司官网人工确认链接",
+}
+
+PRICE_MODE_LABELS_ZH = {
+    "exact_date": "精确日期缓存报价",
+    "flexible_cached": "灵活日期缓存低价",
+    "manual": "人工确认",
+}
+
+
+def category_label_zh(category: str | None) -> str:
+    if not category:
+        return "未知分类"
+    return CATEGORY_LABELS_ZH.get(str(category), str(category))
+
+
+def airport_label_zh(code: str | None) -> str:
+    if not code:
+        return "-"
+    code_str = str(code)
+    name = AIRPORT_LABELS_ZH.get(code_str)
+    return f"{name}（{code_str}）" if name else code_str
+
+
+def route_label_zh(route_name: str | None, candidate: "SearchCandidate | None" = None) -> str:
+    if not route_name:
+        return "未知路线"
+    route = str(route_name)
+    if route.startswith("Tokyo-"):
+        suffix = route.split("Tokyo-", 1)[1]
+        dest_name = ROUTE_SUFFIX_LABELS_ZH.get(suffix)
+        if not dest_name and candidate is not None:
+            dest_name = AIRPORT_LABELS_ZH.get(candidate.destination)
+        if dest_name:
+            return f"东京-{dest_name}"
+    return route
+
+
+def source_label_zh(source_name: str | None) -> str:
+    if not source_name:
+        return "未知平台"
+    source = str(source_name)
+    if source.startswith("airline_official:"):
+        airline = source.split(":", 1)[1]
+        return f"航司官网人工确认链接（{airline}）"
+    return SOURCE_LABELS_ZH.get(source, source)
+
+
+def price_mode_label_zh(price_mode: str | None) -> str:
+    if not price_mode:
+        return "未知模式"
+    return PRICE_MODE_LABELS_ZH.get(str(price_mode), str(price_mode))
+
+
+def bool_label_zh(value: Any) -> str:
+    return "是" if bool(value) else "否"
+
+
 
 
 @dataclass
@@ -1055,14 +1330,14 @@ def describe_price_mode(result: SourceResult) -> str:
     if result.price_mode == "exact_date":
         return "精确日期缓存报价"
     if result.price_mode == "flexible_cached":
-        return "Travelpayouts flexible cached latest price，日期来自缓存低价发现"
+        return "Travelpayouts 灵活日期缓存低价，日期来自缓存低价发现"
     return "需人工确认"
 
 
 def build_alert_subject(alert: dict[str, Any]) -> str:
     r: SourceResult = alert["result"]
     c = r.candidate
-    route = c.route_name.replace("Tokyo-", "Tokyo-")
+    route = route_label_zh(c.route_name, c)
     date_part = c.depart_date
     if alert["abnormal"]:
         return f"【异常低价】{route}｜{format_price(r.price_jpy)}｜{date_part}"
@@ -1099,13 +1374,13 @@ def build_alert_email(alert: dict[str, Any]) -> tuple[str, str, str]:
 
     lines = [
         "路线信息",
-        f"- 路线名称：{c.route_name}",
-        f"- 出发机场：{c.origin}",
-        f"- 到达机场：{c.destination}",
+        f"- 路线名称：{route_label_zh(c.route_name, c)}",
+        f"- 出发机场：{airport_label_zh(c.origin)}",
+        f"- 到达机场：{airport_label_zh(c.destination)}",
         f"- 出发日期：{c.depart_date}",
         f"- 返回日期：{c.return_date or '-'}",
         f"- 单程/往返：{'单程' if c.trip_type == 'oneway' else '往返'}",
-        f"- 目的地分类：{c.destination_category}",
+        f"- 目的地分类：{category_label_zh(c.destination_category)}",
         "",
         "价格信息",
         f"- 当前价格：{format_price(r.price_jpy)}",
@@ -1115,7 +1390,7 @@ def build_alert_email(alert: dict[str, Any]) -> tuple[str, str, str]:
         f"- 历史最低价：{format_price(alert['history_low'])}",
         f"- 降价幅度：{alert['drop_pct'] if alert['drop_pct'] is not None else '-'}%",
         f"- 价格模式：{describe_price_mode(r)}",
-        f"- 平台：{r.source_name}",
+        f"- 平台：{source_label_zh(r.source_name)}",
         f"- 查询链接：{r.query_link}",
         "",
         "转机限制",
@@ -1125,11 +1400,11 @@ def build_alert_email(alert: dict[str, Any]) -> tuple[str, str, str]:
         "- 备注：如果转机次数无法确认，请人工检查航班详情。",
         "",
         "触发原因",
-        f"- 低于目标价：{alert['below_threshold']}",
-        f"- 接近目标价：{alert['watch_price']}",
-        f"- 明显降价：{alert['obvious_drop']}",
-        f"- 异常低价：{alert['abnormal']}",
-        f"- 节假日核心路线：{alert['holiday_core']}",
+        f"- 低于目标价：{bool_label_zh(alert['below_threshold'])}",
+        f"- 接近目标价：{bool_label_zh(alert['watch_price'])}",
+        f"- 明显降价：{bool_label_zh(alert['obvious_drop'])}",
+        f"- 异常低价：{bool_label_zh(alert['abnormal'])}",
+        f"- 节假日核心路线：{bool_label_zh(alert['holiday_core'])}",
     ]
     if r.price_mode == "flexible_cached":
         lines.extend([
@@ -1172,15 +1447,15 @@ def build_weekly_report_email(state: dict[str, Any], config: dict[str, Any]) -> 
         if not rows:
             sections.append("- 暂无可用抓价结果。")
         for item in rows:
-            mode = item.get("price_mode", "unknown")
+            mode = price_mode_label_zh(item.get("price_mode", "unknown"))
             stops = stop_label(item.get("stops"))
             stops_status = stops_status_label(item.get("stops_status", "manual_check_required"))
             sections.append(
-                f"- {item['route_name']} {item['depart_date']}~{item.get('return_date') or '-'} "
-                f"{format_price(item.get('price_jpy'))} {item['source_name']} [{mode}] "
+                f"- {route_label_zh(item.get('route_name'))} {item['depart_date']}~{item.get('return_date') or '-'} "
+                f"{format_price(item.get('price_jpy'))} {source_label_zh(item.get('source_name'))} [{mode}] "
                 f"转机={stops} 转机状态={stops_status} "
-                f"低于目标价={item.get('below_threshold')} 观察价={item.get('watch_price')} "
-                f"明显降价={item.get('obvious_drop')} 异常低价={item.get('abnormal')} "
+                f"低于目标价={bool_label_zh(item.get('below_threshold'))} 观察价={bool_label_zh(item.get('watch_price'))} "
+                f"明显降价={bool_label_zh(item.get('obvious_drop'))} 异常低价={bool_label_zh(item.get('abnormal'))} "
                 f"{item.get('query_link')}"
             )
         sections.append("")
@@ -1189,11 +1464,11 @@ def build_weekly_report_email(state: dict[str, Any], config: dict[str, Any]) -> 
     if not drops:
         sections.append("- 暂无降价记录。")
     for item in drops:
-        sections.append(f"- {item.get('route_name')} 降价 {item.get('drop_pct')}% 当前 {format_price(item.get('price_jpy'))} {item.get('query_link')}")
+        sections.append(f"- {route_label_zh(item.get('route_name'))} 降价 {item.get('drop_pct')}% 当前 {format_price(item.get('price_jpy'))} {item.get('query_link')}")
 
     sections += ["", "## 需要人工确认的路线链接", "以下链接不会自动抓价，需要人工确认价格、转机次数、行李和税费。"]
     for item in manual_links[-50:]:
-        sections.append(f"- {item.get('route_name')} {item.get('source_name')} {item.get('depart_date')} {item.get('query_link')}")
+        sections.append(f"- {route_label_zh(item.get('route_name'))} {source_label_zh(item.get('source_name'))} {item.get('depart_date')} {item.get('query_link')}")
     if not manual_links:
         sections.append("- 暂无。")
 
@@ -1327,8 +1602,8 @@ def build_run_summary(
             else:
                 price_status = "normal"
             lines.append(
-                f"- {c.route_name} {c.origin}->{c.destination} {route_dates} "
-                f"{format_price(result.price_jpy)} via {result.source_name} [{result.price_mode}] "
+                f"- {route_label_zh(c.route_name, c)} {airport_label_zh(c.origin)}->{airport_label_zh(c.destination)} {route_dates} "
+                f"{format_price(result.price_jpy)} via {source_label_zh(result.source_name)} [{price_mode_label_zh(result.price_mode)}] "
                 f"({price_status}, threshold {format_price(c.threshold_jpy)}, watch {format_price(watch_threshold)}, stops {stop_label(result.stops)} / {stops_status_label(result.stops_status)})"
             )
     below_threshold_alerts = sorted(
@@ -1343,9 +1618,9 @@ def build_run_summary(
             route_dates = f"{c.depart_date}" if not c.return_date else f"{c.depart_date} -> {c.return_date}"
             dedup_note = "will email" if alert in alerts_to_send else "dedup suppressed"
             lines.append(
-                f"- {c.route_name} {c.origin}->{c.destination} {route_dates} "
+                f"- {route_label_zh(c.route_name, c)} {airport_label_zh(c.origin)}->{airport_label_zh(c.destination)} {route_dates} "
                 f"{format_price(result.price_jpy)} below {format_price(c.threshold_jpy)} "
-                f"via {result.source_name} ({dedup_note})"
+                f"via {source_label_zh(result.source_name)} ({dedup_note})"
             )
     watch_alerts = sorted(
         [a for a in evaluated_alerts if a.get("watch_price") and a["result"].price_jpy is not None],
@@ -1359,9 +1634,9 @@ def build_run_summary(
             route_dates = f"{c.depart_date}" if not c.return_date else f"{c.depart_date} -> {c.return_date}"
             dedup_note = "will email" if alert in alerts_to_send else "dedup suppressed"
             lines.append(
-                f"- {c.route_name} {c.origin}->{c.destination} {route_dates} "
+                f"- {route_label_zh(c.route_name, c)} {airport_label_zh(c.origin)}->{airport_label_zh(c.destination)} {route_dates} "
                 f"{format_price(result.price_jpy)} <= watch {format_price(alert['watch_threshold'])} "
-                f"via {result.source_name} [{result.price_mode}] ({dedup_note})"
+                f"via {source_label_zh(result.source_name)} [{price_mode_label_zh(result.price_mode)}] ({dedup_note})"
             )
     if rate_limited_count:
         lines += [
