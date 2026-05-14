@@ -1477,7 +1477,53 @@ def build_weekly_report_email(state: dict[str, Any], config: dict[str, Any]) -> 
     return subject, text, html_body
 
 
-def send_email(config: dict[str, Any], subject: str, text_body: str, html_body: str | None = None) -> None:
+def normalize_email_list(values: Any) -> list[str]:
+    if values is None:
+        return []
+    if isinstance(values, str):
+        values = [values]
+    if not isinstance(values, list):
+        return []
+
+    recipients: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        address = str(value).strip()
+        if not address:
+            continue
+        # 避免忘记替换示例地址时误发。
+        if address.lower().endswith("@example.com"):
+            continue
+        key = address.lower()
+        if key not in seen:
+            recipients.append(address)
+            seen.add(key)
+    return recipients
+
+
+def recipients_for_scope(config: dict[str, Any], scope: str, *, weekly_report: bool = False) -> list[str]:
+    email_cfg = config.get("email", {})
+    recipients = normalize_email_list(email_cfg.get("to", []))
+    friends = normalize_email_list(email_cfg.get("friends_to", []))
+
+    if weekly_report:
+        if bool(email_cfg.get("send_weekly_report_to_friends", False)):
+            recipients.extend(friends)
+    elif bool(email_cfg.get("send_global_domestic_to_friends", True)):
+        friend_scopes = set(email_cfg.get("friend_scopes", ["global", "domestic"]))
+        if scope in friend_scopes:
+            recipients.extend(friends)
+
+    return normalize_email_list(recipients)
+
+
+def send_email(
+    config: dict[str, Any],
+    subject: str,
+    text_body: str,
+    html_body: str | None = None,
+    to: list[str] | None = None,
+) -> None:
     smtp_cfg = config.get("smtp", {})
     email_cfg = config.get("email", {})
     password_env = email_cfg.get("password_env", "SMTP_PASSWORD")
@@ -1485,10 +1531,14 @@ def send_email(config: dict[str, Any], subject: str, text_body: str, html_body: 
     if not password:
         raise RuntimeError(f"Missing SMTP password env var: {password_env}")
 
+    recipients = normalize_email_list(to if to is not None else email_cfg.get("to", []))
+    if not recipients:
+        raise RuntimeError("No email recipients configured. Set email.to in the config file.")
+
     msg = EmailMessage()
     msg["Subject"] = subject
     msg["From"] = email_cfg["from"]
-    msg["To"] = ", ".join(email_cfg.get("to", []))
+    msg["To"] = ", ".join(recipients)
     msg.set_content(text_body)
     if html_body:
         msg.add_alternative(html_body, subtype="html")
@@ -1792,7 +1842,7 @@ def main() -> int:
         if dry_run:
             print(text)
         else:
-            send_email(config, subject, text, html_body)
+            send_email(config, subject, text, html_body, to=recipients_for_scope(config, scope, weekly_report=True))
         return 0
 
     run_key = f"last_{scope}_run_date"
@@ -1837,7 +1887,7 @@ def main() -> int:
             print(subject)
             print(text_body)
         else:
-            send_email(config, subject, text_body, html_body)
+            send_email(config, subject, text_body, html_body, to=recipients_for_scope(config, scope))
             mark_alert_sent(state, alert)
 
     if dry_run:

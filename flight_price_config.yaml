@@ -2,12 +2,20 @@ smtp:
   host: smtp.gmail.com
   port: 587
   use_tls: true
-  username: "hailuwang71@gmail.com"
+  username: "your_email@gmail.com"
 
 email:
-  from: "hailuwang71@gmail.com"
+  from: "your_email@gmail.com"
   to:
-    - "hailuwang71@gmail.com"
+    - "your_email@gmail.com"
+  # 朋友邮箱写在这里。global / domestic 模式会同时发给 email.to 和 friends_to。
+  friends_to: []
+  send_global_domestic_to_friends: true
+  friend_scopes:
+    - global
+    - domestic
+  # 周报默认仍然只发给自己；如果也想发给朋友，改成 true。
+  send_weekly_report_to_friends: false
   password_env: SMTP_PASSWORD
 
 settings:
