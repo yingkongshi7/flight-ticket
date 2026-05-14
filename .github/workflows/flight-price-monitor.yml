@@ -71,12 +71,12 @@ jobs:
               dry-run) python flight_price_monitor.py --config flight_price_config.yaml --core-only --link-only --dry-run ;;
               *) python flight_price_monitor.py --config flight_price_config.yaml --core-only ;;
             esac
-          elif [ "$(date -u +%u)" = "6" ] && [ "$(date -u +%H:%M)" = "00:00" ]; then
-            python flight_price_monitor.py --config flight_price_config.yaml --weekly-report
-          elif [ "$(date -u +%u)" = "6" ] && [ "$(date -u +%H:%M)" = "00:30" ]; then
-            python flight_price_monitor.py --config flight_price_config.yaml --domestic-only
-          elif [ "$(date -u +%H:%M)" = "23:30" ]; then
-            python flight_price_monitor.py --config flight_price_config.yaml --global-only
           else
-            python flight_price_monitor.py --config flight_price_config.yaml --core-only
+            case "${{ github.event.schedule }}" in
+              "0 23 * * *") python flight_price_monitor.py --config flight_price_config.yaml --core-only ;;
+              "30 23 * * *") python flight_price_monitor.py --config flight_price_config.yaml --global-only ;;
+              "0 0 * * 6") python flight_price_monitor.py --config flight_price_config.yaml --weekly-report ;;
+              "30 0 * * 6") python flight_price_monitor.py --config flight_price_config.yaml --domestic-only ;;
+              *) python flight_price_monitor.py --config flight_price_config.yaml --core-only ;;
+            esac
           fi
