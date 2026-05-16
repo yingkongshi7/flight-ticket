@@ -34,7 +34,7 @@ jobs:
   monitor:
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write
     env:
       SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
       TRAVELPAYOUTS_TOKEN: ${{ secrets.TRAVELPAYOUTS_TOKEN }}
@@ -47,18 +47,12 @@ jobs:
           python-version: "3.11"
       - name: Install dependencies
         run: pip install -r requirements.txt
-      - name: Restore state cache
-        uses: actions/cache@v4
-        with:
-          path: flight_price_state.json
-          key: flight-price-state-${{ github.run_id }}
-          restore-keys: |
-            flight-price-state-
       - name: Run monitor
         run: |
+          commit_state=true
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             case "${{ inputs.mode }}" in
-              weekly) python flight_price_monitor.py --config flight_price_config.yaml --weekly-report ;;
+              weekly) commit_state=false; python flight_price_monitor.py --config flight_price_config.yaml --weekly-report ;;
               global) python flight_price_monitor.py --config flight_price_config.yaml --global-only ;;
               domestic) python flight_price_monitor.py --config flight_price_config.yaml --domestic-only ;;
               all) python flight_price_monitor.py --config flight_price_config.yaml ;;
@@ -68,15 +62,31 @@ jobs:
               core-force-alerts) python flight_price_monitor.py --config flight_price_config.yaml --core-only --force --force-alerts ;;
               global-force-alerts) python flight_price_monitor.py --config flight_price_config.yaml --global-only --force --force-alerts ;;
               domestic-force-alerts) python flight_price_monitor.py --config flight_price_config.yaml --domestic-only --force --force-alerts ;;
-              dry-run) python flight_price_monitor.py --config flight_price_config.yaml --core-only --link-only --dry-run ;;
+              dry-run) commit_state=false; python flight_price_monitor.py --config flight_price_config.yaml --core-only --link-only --dry-run ;;
               *) python flight_price_monitor.py --config flight_price_config.yaml --core-only ;;
             esac
+          elif [ "$(date -u +%u)" = "6" ] && [ "$(date -u +%H:%M)" = "00:00" ]; then
+            commit_state=false
+            python flight_price_monitor.py --config flight_price_config.yaml --weekly-report
+          elif [ "$(date -u +%u)" = "6" ] && [ "$(date -u +%H:%M)" = "00:30" ]; then
+            python flight_price_monitor.py --config flight_price_config.yaml --domestic-only
+          elif [ "$(date -u +%H:%M)" = "23:30" ]; then
+            python flight_price_monitor.py --config flight_price_config.yaml --global-only
           else
-            case "${{ github.event.schedule }}" in
-              "0 23 * * *") python flight_price_monitor.py --config flight_price_config.yaml --core-only ;;
-              "30 23 * * *") python flight_price_monitor.py --config flight_price_config.yaml --global-only ;;
-              "0 0 * * 6") python flight_price_monitor.py --config flight_price_config.yaml --weekly-report ;;
-              "30 0 * * 6") python flight_price_monitor.py --config flight_price_config.yaml --domestic-only ;;
-              *) python flight_price_monitor.py --config flight_price_config.yaml --core-only ;;
-            esac
+            python flight_price_monitor.py --config flight_price_config.yaml --core-only
           fi
+          echo "commit_state=${commit_state}" >> "$GITHUB_ENV"
+      - name: Commit state
+        run: |
+          if [ "${commit_state}" != "true" ]; then
+            echo "State commit skipped for this mode."
+            exit 0
+          fi
+          if [ ! -f flight_price_state.json ]; then
+            echo "No flight_price_state.json to commit."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add flight_price_state.json
+          git diff --cached --quiet || (git commit -m "update flight price state" && git pull --rebase && git push)
