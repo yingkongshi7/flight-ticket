@@ -168,3 +168,24 @@ $env:TRAVELPAYOUTS_TOKEN="your_token"
 ## 限制
 
 “最多一次转机”在 Travelpayouts 上不一定能 100% 保证，因为缓存 API 可能不返回完整航段。最稳的做法是：能解析就过滤，不能解析就邮件标注“需人工确认”。
+
+## 去重与路线归属
+
+东京-西安是核心路线，只由 `core` 模式负责提醒。`global_routes` 不再包含 `Tokyo-Xian`，避免每天 JST 08:00 的 core 任务和 JST 08:30 的 global 任务重复发送同一条东京-西安邮件。
+
+GitHub Actions 的日常安排：
+- `core`: 每天 JST 08:00 运行东京-西安核心路线。
+- `global`: 每天 JST 08:30 运行全球低价路线，不包含东京-西安。
+- `weekly`: 每周六 JST 09:00 发送周报。
+- `domestic`: 每周六 JST 09:30 运行日本国内线。
+
+`flight_price_state.json` 会在 core / global / domestic / all 正常运行后由 workflow commit 回仓库，用来在不同 GitHub Actions run 之间共享提醒去重记录。`weekly-report`、`dry-run` 和测试邮件不会 commit state。
+
+脚本还会写入跨模式去重 key。同一路线、同目的地、同出发日期、同返回日期、同单程/往返类型，在不同 source、不同 origin 或不同 scope 下不会重复提醒；如果价格再次明显下降，仍可按照 `significant_drop_repeat_pct` 再次提醒。
+
+如果又收到重复邮件，优先检查：
+- 仓库里是否存在多个 workflow 文件同时运行。
+- 是否手动运行了 `core-force-alerts` 或 `global-force-alerts`。
+- `global_routes` 是否又加入了 `Tokyo-Xian` 或其他核心路线。
+- `flight_price_state.json` 是否成功由 GitHub Actions commit。
+- `settings.fail_on_route_overlap` 是否需要临时改成 `true` 来让重复配置直接失败。

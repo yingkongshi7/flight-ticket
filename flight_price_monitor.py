@@ -409,6 +409,7 @@ def load_config(path: str | Path) -> dict[str, Any]:
     with open(path, "r", encoding="utf-8") as f:
         config = yaml.safe_load(f) or {}
     validate_config(config)
+    warn_overlapping_routes(config)
     return config
 
 
@@ -421,6 +422,33 @@ def validate_config(config: dict[str, Any]) -> None:
                 raise ValueError(f"{route.get('name')} contains forbidden Osaka origin(s): {forbidden}")
             if not origins <= ALLOWED_TOKYO_ORIGINS:
                 raise ValueError(f"{route.get('name')} must only use Tokyo origins: {sorted(origins)}")
+
+
+def route_overlap_keys(routes: list[dict[str, Any]]) -> set[tuple[str, str]]:
+    keys: set[tuple[str, str]] = set()
+    for route in routes or []:
+        name = str(route.get("name", ""))
+        for destination in route.get("destination_codes", []) or []:
+            keys.add((name, str(destination)))
+    return keys
+
+
+def warn_overlapping_routes(config: dict[str, Any]) -> None:
+    core_keys = route_overlap_keys(config.get("core_routes", []) or [])
+    global_keys = route_overlap_keys(config.get("global_routes", []) or [])
+    overlaps = sorted(core_keys & global_keys)
+    if not overlaps:
+        return
+
+    messages = [
+        f"Route {name} {destination} exists in both core and global. "
+        "This may cause duplicate alerts. Prefer assigning core route only to core_routes."
+        for name, destination in overlaps
+    ]
+    if bool(config.get("settings", {}).get("fail_on_route_overlap", False)):
+        raise ValueError("; ".join(messages))
+    for message in messages:
+        logging.warning(message)
 
 
 def load_state(path: str | Path = STATE_FILE) -> dict[str, Any]:
@@ -1275,7 +1303,13 @@ def deduplicate_alert(alert: dict[str, Any], state: dict[str, Any], config: dict
     dedup_days = int(settings.get("dedup_days", 7))
     repeat_drop_pct = float(settings.get("significant_drop_repeat_pct", 10))
     legacy_alert = state.get("alerts", {}).get(result.key)
-    last_alert = state.get("alerts", {}).get(result.alert_key) or state.get("alerts", {}).get(result.candidate.alert_group_key) or legacy_alert
+    cross_scope_alert = state.get("alerts", {}).get(cross_scope_route_date_key(alert))
+    last_alert = (
+        state.get("alerts", {}).get(result.alert_key)
+        or state.get("alerts", {}).get(result.candidate.alert_group_key)
+        or cross_scope_alert
+        or legacy_alert
+    )
     if not last_alert:
         return True
     last_date = parse_date(last_alert.get("date", "1970-01-01"))
@@ -1284,6 +1318,20 @@ def deduplicate_alert(alert: dict[str, Any], state: dict[str, Any], config: dict
     last_price = last_alert.get("price_jpy")
     current_price = result.price_jpy
     return bool(percent_drop(last_price, current_price) and percent_drop(last_price, current_price) >= repeat_drop_pct)
+
+
+def cross_scope_route_date_key(alert: dict[str, Any]) -> str:
+    result: SourceResult = alert["result"]
+    c = result.candidate
+    return "|".join(
+        [
+            c.route_name,
+            c.destination,
+            c.depart_date,
+            c.return_date or "",
+            c.trip_type,
+        ]
+    )
 
 
 def alert_priority(alert: dict[str, Any]) -> int:
@@ -1320,6 +1368,19 @@ def select_best_alerts_by_group(evaluated_alerts: list[dict[str, Any]]) -> list[
         best.values(),
         key=lambda a: (alert_priority(a), a["result"].price_jpy or 10**12, a["result"].candidate.route_name),
     )
+
+
+def suppress_duplicate_alerts_within_run(alerts: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    unique_alerts: list[dict[str, Any]] = []
+    sent_cross_scope_keys: set[str] = set()
+    for alert in alerts:
+        key = cross_scope_route_date_key(alert)
+        if key in sent_cross_scope_keys:
+            logging.info("Duplicate alert suppressed within same run: %s", key)
+            continue
+        sent_cross_scope_keys.add(key)
+        unique_alerts.append(alert)
+    return unique_alerts
 
 
 def format_price(value: int | None) -> str:
@@ -1511,10 +1572,78 @@ def recipients_for_scope(config: dict[str, Any], scope: str, *, weekly_report: b
             recipients.extend(friends)
     elif bool(email_cfg.get("send_global_domestic_to_friends", True)):
         friend_scopes = set(email_cfg.get("friend_scopes", ["global", "domestic"]))
-        if scope in friend_scopes:
+        # 国内路线启用“自己单程、朋友往返”时，普通 domestic 结果只发给自己；
+        # 朋友会收到单独生成的往返 domestic 结果。
+        if scope == "domestic" and friend_domestic_roundtrip_enabled(config):
+            pass
+        elif scope in friend_scopes:
             recipients.extend(friends)
 
     return normalize_email_list(recipients)
+
+
+def friend_recipients(config: dict[str, Any]) -> list[str]:
+    return normalize_email_list((config.get("email", {}) or {}).get("friends_to", []))
+
+
+def friend_domestic_roundtrip_enabled(config: dict[str, Any]) -> bool:
+    email_cfg = config.get("email", {}) or {}
+    return bool(email_cfg.get("friend_domestic_roundtrip_enabled", True))
+
+
+def generate_friend_domestic_candidate_searches(config: dict[str, Any]) -> list[SearchCandidate]:
+    """Generate separate Japan domestic round-trip candidates for friends.
+
+    The user's normal domestic_routes stay unchanged, so the user can keep
+    receiving one-way domestic alerts. Friends receive these generated
+    round-trip variants instead.
+    """
+    email_cfg = config.get("email", {}) or {}
+    multiplier = float(email_cfg.get("friend_domestic_roundtrip_threshold_multiplier", 2.0))
+    friend_routes: list[dict[str, Any]] = []
+    for route in config.get("domestic_routes", []) or []:
+        friend_route = dict(route)
+        friend_route["trip_type"] = "roundtrip"
+        for key in ("threshold_jpy", "normal_threshold_jpy", "very_cheap_jpy", "abnormal_jpy"):
+            if key in friend_route and friend_route[key] is not None:
+                friend_route[key] = int(round(float(friend_route[key]) * multiplier))
+        friend_routes.append(friend_route)
+
+    friend_config = dict(config)
+    friend_config["domestic_routes"] = friend_routes
+    return generate_candidate_searches(friend_config, domestic_only=True)
+
+
+def process_candidates_for_alerts(
+    candidates: list[SearchCandidate],
+    state: dict[str, Any],
+    config: dict[str, Any],
+    *,
+    link_only: bool = False,
+    force_alerts: bool = False,
+) -> tuple[list[SourceResult], list[dict[str, Any]], list[dict[str, Any]]]:
+    evaluated_alerts: list[dict[str, Any]] = []
+    source_results: list[SourceResult] = []
+
+    for candidate in candidates:
+        for source_result in build_source_links(candidate, config):
+            result = fetch_price_optional(source_result, config, link_only=link_only)
+            source_results.append(result)
+            alert = evaluate_price_alert(result, state, config)
+            evaluated_alerts.append(alert)
+
+    best_alerts = select_best_alerts_by_group(evaluated_alerts)
+    if force_alerts:
+        alerts_to_send = suppress_duplicate_alerts_within_run(best_alerts)
+    else:
+        alerts_to_send = suppress_duplicate_alerts_within_run(
+            [alert for alert in best_alerts if deduplicate_alert(alert, state, config)]
+        )
+
+    for alert in evaluated_alerts:
+        update_state_for_result(state, alert)
+
+    return source_results, evaluated_alerts, alerts_to_send
 
 
 def send_email(
@@ -1797,8 +1926,11 @@ def update_state_for_result(state: dict[str, Any], alert: dict[str, Any]) -> Non
 
 def mark_alert_sent(state: dict[str, Any], alert: dict[str, Any]) -> None:
     result: SourceResult = alert["result"]
-    state.setdefault("alerts", {})[result.alert_key] = {"date": dt.date.today().isoformat(), "price_jpy": result.price_jpy}
-    state.setdefault("alerts", {})[result.candidate.alert_group_key] = {"date": dt.date.today().isoformat(), "price_jpy": result.price_jpy}
+    alert_record = {"date": dt.date.today().isoformat(), "price_jpy": result.price_jpy}
+    alerts = state.setdefault("alerts", {})
+    alerts[result.alert_key] = alert_record
+    alerts[result.candidate.alert_group_key] = alert_record
+    alerts[cross_scope_route_date_key(alert)] = alert_record
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
@@ -1846,9 +1978,23 @@ def main() -> int:
         return 0
 
     run_key = f"last_{scope}_run_date"
-    if not dry_run and not args.force and state.setdefault("runs", {}).get(run_key) == today:
-        logging.info("Monitor mode '%s' already ran today (%s); exiting to avoid duplicate daily runs.", scope, today)
+    state_run_date = state.setdefault("runs", {}).get(run_key)
+    if not dry_run and not args.force and state_run_date == today:
+        logging.info(
+            "Monitor mode %s already ran today. run_key=%s, today=%s, state_date=%s, exiting=true",
+            scope,
+            run_key,
+            today,
+            state_run_date,
+        )
         return 0
+    logging.info(
+        "Monitor run guard: scope=%s, run_key=%s, today=%s, state_date=%s, exiting=false",
+        scope,
+        run_key,
+        today,
+        state_run_date,
+    )
 
     candidates = generate_candidate_searches(
         config,
@@ -1857,37 +2003,63 @@ def main() -> int:
         global_only=args.global_only,
     )
     logging.info("Generated %d candidate searches.", len(candidates))
-    evaluated_alerts: list[dict[str, Any]] = []
-    source_results: list[SourceResult] = []
 
-    for candidate in candidates:
-        for source_result in build_source_links(candidate, config):
-            result = fetch_price_optional(source_result, config, link_only=args.link_only)
-            source_results.append(result)
-            alert = evaluate_price_alert(result, state, config)
-            evaluated_alerts.append(alert)
+    source_results, evaluated_alerts, alerts_to_send = process_candidates_for_alerts(
+        candidates,
+        state,
+        config,
+        link_only=args.link_only,
+        force_alerts=args.force_alerts,
+    )
 
-    best_alerts = select_best_alerts_by_group(evaluated_alerts)
-    if args.force_alerts:
-        alerts_to_send = best_alerts
-    else:
-        alerts_to_send = [alert for alert in best_alerts if deduplicate_alert(alert, state, config)]
+    friend_candidates: list[SearchCandidate] = []
+    friend_source_results: list[SourceResult] = []
+    friend_evaluated_alerts: list[dict[str, Any]] = []
+    friend_alerts_to_send: list[dict[str, Any]] = []
+    if scope == "domestic" and friend_domestic_roundtrip_enabled(config) and friend_recipients(config):
+        friend_candidates = generate_friend_domestic_candidate_searches(config)
+        logging.info("Generated %d friend domestic round-trip candidate searches.", len(friend_candidates))
+        friend_source_results, friend_evaluated_alerts, friend_alerts_to_send = process_candidates_for_alerts(
+            friend_candidates,
+            state,
+            config,
+            link_only=args.link_only,
+            force_alerts=args.force_alerts,
+        )
 
-    for alert in evaluated_alerts:
-        update_state_for_result(state, alert)
+    all_candidates = candidates + friend_candidates
+    all_source_results = source_results + friend_source_results
+    all_evaluated_alerts = evaluated_alerts + friend_evaluated_alerts
+    all_alerts_to_send = alerts_to_send + friend_alerts_to_send
 
-    logging.info("Prepared %d alert email(s).", len(alerts_to_send))
-    summary = build_run_summary(candidates, source_results, evaluated_alerts, alerts_to_send, scope, config)
+    logging.info("Prepared %d alert email(s).", len(all_alerts_to_send))
+    summary = build_run_summary(all_candidates, all_source_results, all_evaluated_alerts, all_alerts_to_send, scope, config)
     logging.info("\n%s", summary)
     publish_github_step_summary(summary)
+
+    self_recipients = recipients_for_scope(config, scope)
+    friends = friend_recipients(config)
+
     for alert in alerts_to_send:
         subject, text_body, html_body = build_alert_email(alert)
         if dry_run:
             print("\n" + "=" * 80)
+            print("收件人：" + ", ".join(self_recipients))
             print(subject)
             print(text_body)
         else:
-            send_email(config, subject, text_body, html_body, to=recipients_for_scope(config, scope))
+            send_email(config, subject, text_body, html_body, to=self_recipients)
+            mark_alert_sent(state, alert)
+
+    for alert in friend_alerts_to_send:
+        subject, text_body, html_body = build_alert_email(alert)
+        if dry_run:
+            print("\n" + "=" * 80)
+            print("收件人：" + ", ".join(friends))
+            print(subject)
+            print(text_body)
+        else:
+            send_email(config, subject, text_body, html_body, to=friends)
             mark_alert_sent(state, alert)
 
     if dry_run:
