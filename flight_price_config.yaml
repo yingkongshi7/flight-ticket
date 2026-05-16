@@ -11,7 +11,7 @@ email:
   # 朋友邮箱写在这里。global / domestic 模式会同时发给 email.to 和 friends_to。
   friends_to: 
     - "tyuu7517@gmail.com"
-    - "andyping1989@yahoo.co.jp"
+  #  - "andyping1989@yahoo.co.jp"
   send_global_domestic_to_friends: true
   friend_scopes:
     - global
