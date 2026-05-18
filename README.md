@@ -1,191 +1,280 @@
-# Flight Price Monitor
+# Market Drawdown Monitor
 
-安全优先的 Python 3 机票价格监控脚本，适合放在 GitHub Actions 定时运行。
+这是一个美股指数回撤加仓提醒脚本，用于监控 S&P500 / Nasdaq / SOX / VIX。
 
-本项目不是自动购票工具：不会自动下单、不会保存支付信息、不会登录网站、不会绕过验证码，也不会爬取 Google Flights / Skyscanner / Trip.com / 携程 / 飞猪等动态网页。
+它只发送邮件提醒，不连接券商 API，不自动下单。它不是日本股票监控脚本。
 
-## 数据源策略
+## 策略逻辑
 
-- Travelpayouts / Aviasales Data API：主要真实价格源，返回缓存价格。
-- Amadeus：可选真实价格源，默认关闭。
-- Google Flights / Skyscanner / Trip.com / 携程 / 飞猪 / 航司官网：只生成人工确认链接，不自动抓价。
+- S&P500 / Nasdaq 是主触发器。
+- SOX 只作为半导体辅助判断，不单独触发加仓。
+- VIX 只作为恐慌辅助判断，不单独触发邮件或大额加仓。
+- 同一档位只提醒一次。
+- 本策略从原 7 档升级为 13 档，档位间隔为 2.5%。
+- 加仓资金总额仍为 700万日元。
+- 中间版分配原则：浅跌宽基，深跌增强 NASDAQ100，SOX 小仓，TOPIX 不参与主加仓。
+- 当市场一次性跌穿多个 2.5% 档位时，脚本会识别所有新触发档位。
+- 通常情况下，新触发 1～2 档可以直接执行。
+- 如果一次性新触发 3 档以上，或出现极端波动，脚本会建议当天优先执行较浅的前 1～2 档，其余档位进入待确认。
+- 邮件发送成功后才更新 `triggered_levels.json`。
+- `--dry-run` 不发送邮件、不更新触发档位。
+- `--report` 只打印状态，不发送邮件、不更新状态。
+- 所有买入都需要人工确认；脚本不会连接券商 API，不会自动下单。
 
-Travelpayouts 返回的是缓存数据，不保证实时、不保证最终含税价、不保证包含托运行李。最终价格、转机次数、行李、税费、退改签和签证要求都必须人工确认。
+## 文件结构
 
-## 转机限制
-
-默认配置：
-
-```yaml
-settings:
-  max_stops: 1
-  direct_only: false
-  allow_unknown_stops: true
+```text
+.
+├── .github/workflows/daily-monitor.yml
+├── archive/market_drawdown_monitor_v1.py
+├── market_drawdown_monitor.py
+├── config.yaml
+├── requirements.txt
+├── README.md
+└── .gitignore
 ```
 
-含义：
+`market_drawdown_monitor.py` 是当前正式策略 2.0 脚本。`archive/market_drawdown_monitor_v1.py` 是旧版 1.0 归档文件，不再作为正式入口。
 
-- `max_stops: 0`：只接受直飞。
-- `max_stops: 1`：最多一次转机。
-- `max_stops: 2`：最多两次转机。
-- `direct_only: true`：等价于 `max_stops: 0`。
-- `allow_unknown_stops: true`：如果 API 没返回可判断的转机次数，保留报价，但邮件中标注“转机次数需人工确认”。
-- `allow_unknown_stops: false`：无法判断转机次数的报价会被丢弃。
+## 安装依赖
 
-Travelpayouts 的 `direct` 参数只能区分“只直飞”和“不限制直飞”，不能 100% 原生保证“最多一次转机”。脚本会尽量从 `transfers`、`number_of_changes`、`stops`、`segments`、`route` 等字段解析转机次数；能解析就过滤，不能解析就按 `allow_unknown_stops` 决定保留或丢弃。
-
-Amadeus 如果启用，会向 Flight Offers Search 传入 `maxStops`，并从 `itineraries / segments` 判断转机次数。它的转机判断通常比 Travelpayouts 缓存 API 更可靠。
-
-Google Flights / Trip.com / 携程 / 飞猪 / Skyscanner 等人工确认链接仍需手动确认转机次数、行李、税费和最终价格。直飞模式下，Google Flights 查询词会追加 `nonstop`，但仍需人工确认。
-
-## 当前监控策略
-
-当前 Travelpayouts 配置：
-
-```yaml
-sources:
-  travelpayouts:
-    max_requests_per_run: 300
-    pause_every_requests: 80
-    pause_seconds: 5
-    retry_attempts: 3
-    retry_base_sleep_seconds: 2
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
 ```
 
-大致候选数量：
+## 邮箱配置
 
-- `core-only`: 48
-- `domestic-only`: 144
-- `global-only`: 352
-- `all`: 544
-
-建议日常分开运行，不建议把 `all` 作为每天自动任务。
-
-价格模式：
-
-- `domestic`：使用 Travelpayouts `prices_for_dates`，精确日期缓存报价。
-- `core`：先用 `prices_for_dates` 查精确日期；没有报价时 fallback 到 `get_latest_prices` flexible cached low-price。
-- `global`：使用 `get_latest_prices` flexible cached latest price，适合发现低价机会，不代表精确日期实时价格。
-- `manual`：人工确认链接。
-
-## 提醒规则
-
-强提醒：
-
-- 低于路线目标价。
-- 明显降价。
-- 异常低价。
-- 东京-西安节假日重点低价。
-
-观察提醒：
+编辑 `config.yaml`：
 
 ```yaml
-settings:
-  watch_price_alert_enabled: true
-  watch_price_margin_pct: 25
+email:
+  smtp_host: "smtp.gmail.com"
+  smtp_port: 587
+  use_tls: true
+  username: "your_email@gmail.com"
+  from_addr: "your_email@gmail.com"
+  to_addrs:
+    - "your_email@gmail.com"
+  password_env: "SMTP_PASSWORD"
 ```
 
-如果价格没有低于目标价，但在 `threshold_jpy * 1.25` 内，会发送 `【机票观察】`。观察提醒参与去重，避免每天重复提醒。
+邮箱密码不要写入 `config.yaml`。请使用环境变量：
 
-邮件标题和正文以中文为主。邮件正文会显示：
+```bash
+export SMTP_PASSWORD="你的邮箱应用专用密码"
+```
 
-- 价格模式。
-- 原始候选日期和 flexible cached 实际低价日期。
-- 配置的最大转机次数。
-- API 返回转机次数。
-- 转机判断状态：已确认 / 需人工确认 / 无法确认。
+如果使用 Gmail，请使用 Google 账号生成的 16 位“应用专用密码”，不是普通登录密码。
 
-如果 `Priced results > 0` 但 `Alert emails prepared = 0`，通常说明价格未达到目标价、观察价阈值或降价规则，或者被重复提醒控制抑制。
+GitHub Actions 中需要设置：
 
-如果出现 `rate_limited`，建议降低 `max_requests_per_run`、增大 `pause_seconds`，或继续分批运行。
+`Settings -> Secrets and variables -> Actions -> New repository secret`
 
-## GitHub Secrets
+名称：
 
-在仓库 `Settings -> Secrets and variables -> Actions -> Repository secrets` 中设置：
+```text
+SMTP_PASSWORD
+```
 
-- `SMTP_PASSWORD`: Gmail App Password，用于发送邮件。
-- `TRAVELPAYOUTS_TOKEN`: Travelpayouts / Aviasales Data API token。
+值：你的 Gmail 应用专用密码。
 
-可选：
+## 常用命令
 
-- `AMADEUS_CLIENT_ID`
-- `AMADEUS_CLIENT_SECRET`
+语法检查：
+
+```bash
+python -m py_compile market_drawdown_monitor.py
+```
+
+报告：
+
+```bash
+python market_drawdown_monitor.py --config config.yaml --report
+```
+
+dry-run 测试：
+
+```bash
+python market_drawdown_monitor.py --config config.yaml --dry-run --force-level 10
+```
+
+深跌档测试：
+
+```bash
+python market_drawdown_monitor.py --config config.yaml --dry-run --force-level 25
+```
+
+测试邮件：
+
+```bash
+python market_drawdown_monitor.py --config config.yaml --test-email
+```
+
+正式运行：
+
+```bash
+python market_drawdown_monitor.py --config config.yaml
+```
+
+## 运行环境选择
+
+建议只选择一种正式运行环境：
+
+- 本地 cron
+- 或 GitHub Actions
+
+不要长期同时在本地和 GitHub Actions 中正式运行，否则 `triggered_levels.json` 状态可能不一致，导致重复提醒或漏提醒。
+
+GitHub Actions 的 workflow 会使用 `git add -f triggered_levels.json` 强制提交状态文件，用于保留已触发档位，避免下一次运行重复提醒。
 
 ## GitHub Actions
 
-`.github/workflows/flight-price-monitor.yml` 使用 UTC cron：
+`.github/workflows/daily-monitor.yml` 会在日本时间每天早上 8 点运行。
 
-- `23:00 UTC` = 日本时间次日 `08:00`，每天运行核心路线。
-- `23:30 UTC` = 日本时间次日 `08:30`，每天运行全球路线。
-- `00:00 UTC Saturday` = 日本时间周六 `09:00`，发送周报。
-- `00:30 UTC Saturday` = 日本时间周六 `09:30`，每周运行日本国内路线。
+GitHub Actions 使用 UTC，所以 cron 是：
 
-手动测试同一天重复运行：
+```yaml
+- cron: "0 23 * * *"
+```
 
-- `core-force`
-- `global-force`
-- `domestic-force`
+也可以在 GitHub 的 `Actions` 页面手动运行，模式包括：
 
-测试邮件并临时绕过 7 天重复提醒：
+- `normal`：正常判断是否触发提醒
+- `test-email`：只测试邮件
+- `dry-run-10`：生成 -10% 档邮件内容但不发送
+- `dry-run-25`：生成 -25% 档邮件内容但不发送
+- `report`：打印当前市场状态
 
-- `core-force-alerts`
-- `global-force-alerts`
-- `domestic-force-alerts`
+## cron 每天运行
 
-## 本地运行
+如果在 macOS/Linux 上运行：
 
 ```bash
-pip install -r requirements.txt
-python flight_price_monitor.py --config flight_price_config.yaml --dry-run --core-only --link-only
-python flight_price_monitor.py --config flight_price_config.yaml --weekly-report --dry-run
+crontab -e
 ```
 
-Linux / macOS:
-
-```bash
-export SMTP_PASSWORD="your_gmail_app_password"
-export TRAVELPAYOUTS_TOKEN="your_token"
-```
-
-Windows PowerShell:
-
-```powershell
-$env:SMTP_PASSWORD="your_gmail_app_password"
-$env:TRAVELPAYOUTS_TOKEN="your_token"
-```
-
-## Cron 示例
-
-如果服务器时区是日本时间：
+加入：
 
 ```cron
-0 8 * * * cd /path/to/repo && /usr/bin/python3 flight_price_monitor.py --config flight_price_config.yaml --core-only
-30 8 * * * cd /path/to/repo && /usr/bin/python3 flight_price_monitor.py --config flight_price_config.yaml --global-only
-0 9 * * 6 cd /path/to/repo && /usr/bin/python3 flight_price_monitor.py --config flight_price_config.yaml --weekly-report
-30 9 * * 6 cd /path/to/repo && /usr/bin/python3 flight_price_monitor.py --config flight_price_config.yaml --domestic-only
+TZ=Asia/Tokyo
+0 8 * * * cd /path/to/MarketDrawdownMonitor && SMTP_PASSWORD="你的邮箱应用专用密码" /path/to/MarketDrawdownMonitor/.venv/bin/python market_drawdown_monitor.py --config config.yaml >> cron.log 2>&1
 ```
 
-## 限制
+## VIX 说明
 
-“最多一次转机”在 Travelpayouts 上不一定能 100% 保证，因为缓存 API 可能不返回完整航段。最稳的做法是：能解析就过滤，不能解析就邮件标注“需人工确认”。
+VIX 不会单独触发邮件。
 
-## 去重与路线归属
+本脚本只有在 S&P500 或 Nasdaq 达到配置的回撤档位时才发送行动提醒。VIX 只会在邮件中作为辅助判断，用于提示市场是否进入恐慌状态。
 
-东京-西安是核心路线，只由 `core` 模式负责提醒。`global_routes` 不再包含 `Tokyo-Xian`，避免每天 JST 08:00 的 core 任务和 JST 08:30 的 global 任务重复发送同一条东京-西安邮件。
+辅助规则：
 
-GitHub Actions 的日常安排：
-- `core`: 每天 JST 08:00 运行东京-西安核心路线。
-- `global`: 每天 JST 08:30 运行全球低价路线，不包含东京-西安。
-- `weekly`: 每周六 JST 09:00 发送周报。
-- `domestic`: 每周六 JST 09:30 运行日本国内线。
+- VIX 高于 25：提示市场波动升高
+- VIX 高于 30 且接近 -10%：提示可提前准备第一档的一半资金，但必须人工确认
+- VIX 高于 30 且已经触发 -15% 或更深档：提示不要因为恐慌新闻取消计划
+- VIX 高于 35：恐慌区，若回撤档位已触发，应尊重脚本并检查资金和数据
 
-`flight_price_state.json` 会在 core / global / domestic / all 正常运行后由 workflow commit 回仓库，用来在不同 GitHub Actions run 之间共享提醒去重记录。`weekly-report`、`dry-run` 和测试邮件不会 commit state。
+主触发器始终是 S&P500 / Nasdaq 的收盘价回撤。
 
-脚本还会写入跨模式去重 key。同一路线、同目的地、同出发日期、同返回日期、同单程/往返类型，在不同 source、不同 origin 或不同 scope 下不会重复提醒；如果价格再次明显下降，仍可按照 `significant_drop_repeat_pct` 再次提醒。
+VXN、10年美债、CPI、SOX 过热指标等宏观或估值信息也只能作为辅助解释，不单独触发买卖。
 
-如果又收到重复邮件，优先检查：
-- 仓库里是否存在多个 workflow 文件同时运行。
-- 是否手动运行了 `core-force-alerts` 或 `global-force-alerts`。
-- `global_routes` 是否又加入了 `Tokyo-Xian` 或其他核心路线。
-- `flight_price_state.json` 是否成功由 GitHub Actions commit。
-- `settings.fail_on_route_overlap` 是否需要临时改成 `true` 来让重复配置直接失败。
+## 多档位叠穿与待确认机制
+
+当市场一次性跌穿多个 2.5% 档位时，脚本会完整识别所有新触发档位。
+
+执行节奏规则：
+
+- 新触发 1 档：建议直接执行该档。
+- 新触发 2 档：常规情况下可以执行全部新触发档位。
+- 新触发 3 档以上：建议当天优先执行较浅的前 2 档，其余进入待确认。
+- 如果出现极端波动，且本次新触发 2 档以上：建议当天先执行较浅的前 1～2 档，其余进入待确认。
+
+极端波动的简单判断：
+
+- Nasdaq 单日跌幅 <= -5%
+- S&P500 单日跌幅 <= -4%
+- VIX >= 30
+- VXN >= 35
+
+待确认档位会在下一次正式运行时根据收盘回撤是否仍满足条件来决定是否执行：
+
+- 如果仍满足该档位或更深：移入 `triggered_levels`，邮件中列为“待确认档位已确认执行”。
+- 如果不再满足：从 `pending_confirm_levels` 移除，并在邮件中说明“未确认执行”。
+
+这个机制是为了避免极端暴跌日一次性投入过多资金，不改变总加仓计划，也不取消已经触发的策略纪律。
+
+## 触发即执行，不等待下一档
+
+策略 2.0 的纪律是：
+
+- 当前档位一旦由收盘价触发，就执行当前档位
+- 不因为担心未来跌到下一档而跳过本档
+- 宁可在 -25% 买入后短期被套，也不要为了等 -30% 错过大底
+- 脚本负责触发，人负责确认；但人不能因为恐惧或贪婪随意否决规则
+
+## 当前 NISA 每月定投组合
+
+| 基金 | 每月金额 | 作用 |
+|---|---:|---|
+| SBI・V・S&P500 | 40,000円 | 美股核心宽基 |
+| eMAXIS Slim 全世界株式（オール・カントリー） | 25,000円 | 全球分散层 |
+| ニッセイNASDAQ100 | 20,000円 | AI / 科技成长卫星 |
+| ニッセイSOX | 10,000円 | 半导体进攻仓 |
+| ニッセイTOPIX | 5,000円 | 日本 / 日元资产补充 |
+
+- S&P500 是核心。
+- オルカン承担全球分散，不再使用ニッセイ外国株式作为加仓配置。
+- NASDAQ100 和 SOX 是进攻仓，需要控制比例。
+- TOPIX 作为日元资产和日本市场补充。
+- 现金子弹加仓时，仍以 S&P500、オルカン、NASDAQ100、SOX 为主。
+- TOPIX 不作为美股回撤加仓表的主要对象。
+
+## 当前触发档位
+
+配置在 `config.yaml`：
+
+| 回撤 | 金额 | 分配 |
+| --- | ---: | --- |
+| -10.0% | 30万 | S&P500 16万、オルカン 10万、NASDAQ100 4万、SOX 0万、TOPIX 0万 |
+| -12.5% | 30万 | S&P500 16万、オルカン 10万、NASDAQ100 4万、SOX 0万、TOPIX 0万 |
+| -15.0% | 35万 | S&P500 18万、オルカン 11万、NASDAQ100 6万、SOX 0万、TOPIX 0万 |
+| -17.5% | 35万 | S&P500 17万、オルカン 11万、NASDAQ100 7万、SOX 0万、TOPIX 0万 |
+| -20.0% | 45万 | S&P500 19万、オルカン 13万、NASDAQ100 12万、SOX 1万、TOPIX 0万 |
+| -22.5% | 45万 | S&P500 19万、オルカン 12万、NASDAQ100 12万、SOX 2万、TOPIX 0万 |
+| -25.0% | 55万 | S&P500 21万、オルカン 15万、NASDAQ100 17万、SOX 2万、TOPIX 0万 |
+| -27.5% | 55万 | S&P500 21万、オルカン 15万、NASDAQ100 16万、SOX 3万、TOPIX 0万 |
+| -30.0% | 70万 | S&P500 24万、オルカン 18万、NASDAQ100 23万、SOX 5万、TOPIX 0万 |
+| -32.5% | 70万 | S&P500 24万、オルカン 17万、NASDAQ100 24万、SOX 5万、TOPIX 0万 |
+| -35.0% | 80万 | S&P500 28万、オルカン 20万、NASDAQ100 27万、SOX 5万、TOPIX 0万 |
+| -37.5% | 80万 | S&P500 27万、オルカン 20万、NASDAQ100 28万、SOX 5万、TOPIX 0万 |
+| -40.0% | 70万 | S&P500 25万、オルカン 15万、NASDAQ100 25万、SOX 5万、TOPIX 0万 |
+
+合计：S&P500 275万、オルカン 187万、NASDAQ100 205万、SOX 33万、TOPIX 0万，总计 700万。
+
+## 状态文件
+
+`triggered_levels.json` 记录已经提醒过的档位。同一档位只提醒一次。
+
+`pending_confirm_levels` 记录已经被市场叠穿、但因多档位叠穿或极端波动暂缓到下一次正式运行确认的档位。
+
+如果你想重新开始一轮提醒，可以手动把它改回：
+
+```json
+{
+  "last_highs": {},
+  "pending_confirm_levels": [],
+  "expired_pending_levels": [],
+  "triggered_levels": []
+}
+```
+
+## 日本股票脚本说明
+
+本仓库只用于美股指数回撤加仓提醒。
+
+日本股票观察脚本是另一个独立项目，不应放在本仓库中混用。
+
+## 免责声明
+
+这不是自动交易，不是确定买卖指令。脚本不会连接券商 API，不会自动下单。所有操作都需要人工确认后执行。

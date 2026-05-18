@@ -1,0 +1,177 @@
+# 策略 2.0 执行提醒配置示例
+
+lookback_period: "5y"
+reset_on_new_high: false
+
+state_file: "triggered_levels.json"
+log_file: "monitor.log"
+
+indices:
+  sp500:
+    name: "S&P 500"
+    ticker: "^GSPC"
+    optional: false
+  nasdaq:
+    name: "Nasdaq Composite"
+    ticker: "^IXIC"
+    optional: false
+  sox:
+    name: "SOX Semiconductor Index"
+    ticker:
+      - "^SOX"
+      - "SOXX"
+      - "SMH"
+    optional: true
+  vix:
+    name: "VIX"
+    ticker: "^VIX"
+    optional: true
+  vxn:
+    name: "VXN"
+    ticker: "^VXN"
+    optional: true
+
+primary_trigger_indices:
+  - sp500
+  - nasdaq
+
+email:
+  smtp_host: "smtp.gmail.com"
+  smtp_port: 587
+  use_tls: true
+  username: "your_email@gmail.com"
+  from_addr: "your_email@gmail.com"
+  to_addrs:
+    - "your_email@gmail.com"
+  password_env: "SMTP_PASSWORD"
+
+trigger_levels:
+  - drawdown_pct: 10.0
+    label: "-10.0%"
+    total_amount_man_yen: 30
+    allocations:
+      SBI・V・S&P500: 16
+      eMAXIS Slim オルカン: 10
+      ニッセイNASDAQ100: 4
+      ニッセイSOX: 0
+      ニッセイTOPIX: 0
+
+  - drawdown_pct: 12.5
+    label: "-12.5%"
+    total_amount_man_yen: 30
+    allocations:
+      SBI・V・S&P500: 16
+      eMAXIS Slim オルカン: 10
+      ニッセイNASDAQ100: 4
+      ニッセイSOX: 0
+      ニッセイTOPIX: 0
+
+  - drawdown_pct: 15.0
+    label: "-15.0%"
+    total_amount_man_yen: 35
+    allocations:
+      SBI・V・S&P500: 18
+      eMAXIS Slim オルカン: 11
+      ニッセイNASDAQ100: 6
+      ニッセイSOX: 0
+      ニッセイTOPIX: 0
+
+  - drawdown_pct: 17.5
+    label: "-17.5%"
+    total_amount_man_yen: 35
+    allocations:
+      SBI・V・S&P500: 17
+      eMAXIS Slim オルカン: 11
+      ニッセイNASDAQ100: 7
+      ニッセイSOX: 0
+      ニッセイTOPIX: 0
+
+  - drawdown_pct: 20.0
+    label: "-20.0%"
+    total_amount_man_yen: 45
+    allocations:
+      SBI・V・S&P500: 19
+      eMAXIS Slim オルカン: 13
+      ニッセイNASDAQ100: 12
+      ニッセイSOX: 1
+      ニッセイTOPIX: 0
+
+  - drawdown_pct: 22.5
+    label: "-22.5%"
+    total_amount_man_yen: 45
+    allocations:
+      SBI・V・S&P500: 19
+      eMAXIS Slim オルカン: 12
+      ニッセイNASDAQ100: 12
+      ニッセイSOX: 2
+      ニッセイTOPIX: 0
+
+  - drawdown_pct: 25.0
+    label: "-25.0%"
+    total_amount_man_yen: 55
+    allocations:
+      SBI・V・S&P500: 21
+      eMAXIS Slim オルカン: 15
+      ニッセイNASDAQ100: 17
+      ニッセイSOX: 2
+      ニッセイTOPIX: 0
+
+  - drawdown_pct: 27.5
+    label: "-27.5%"
+    total_amount_man_yen: 55
+    allocations:
+      SBI・V・S&P500: 21
+      eMAXIS Slim オルカン: 15
+      ニッセイNASDAQ100: 16
+      ニッセイSOX: 3
+      ニッセイTOPIX: 0
+
+  - drawdown_pct: 30.0
+    label: "-30.0%"
+    total_amount_man_yen: 70
+    allocations:
+      SBI・V・S&P500: 24
+      eMAXIS Slim オルカン: 18
+      ニッセイNASDAQ100: 23
+      ニッセイSOX: 5
+      ニッセイTOPIX: 0
+
+  - drawdown_pct: 32.5
+    label: "-32.5%"
+    total_amount_man_yen: 70
+    allocations:
+      SBI・V・S&P500: 24
+      eMAXIS Slim オルカン: 17
+      ニッセイNASDAQ100: 24
+      ニッセイSOX: 5
+      ニッセイTOPIX: 0
+
+  - drawdown_pct: 35.0
+    label: "-35.0%"
+    total_amount_man_yen: 80
+    allocations:
+      SBI・V・S&P500: 28
+      eMAXIS Slim オルカン: 20
+      ニッセイNASDAQ100: 27
+      ニッセイSOX: 5
+      ニッセイTOPIX: 0
+
+  - drawdown_pct: 37.5
+    label: "-37.5%"
+    total_amount_man_yen: 80
+    allocations:
+      SBI・V・S&P500: 27
+      eMAXIS Slim オルカン: 20
+      ニッセイNASDAQ100: 28
+      ニッセイSOX: 5
+      ニッセイTOPIX: 0
+
+  - drawdown_pct: 40.0
+    label: "-40.0%"
+    total_amount_man_yen: 70
+    allocations:
+      SBI・V・S&P500: 25
+      eMAXIS Slim オルカン: 15
+      ニッセイNASDAQ100: 25
+      ニッセイSOX: 5
+      ニッセイTOPIX: 0
