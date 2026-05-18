@@ -2,10 +2,18 @@ name: Flight Price Monitor
 
 on:
   schedule:
-    - cron: "0 23 * * *"      # JST 08:00 daily core
-    - cron: "30 23 * * *"     # JST 08:30 daily global
-    - cron: "0 0 * * 6"       # JST Saturday 09:00 weekly report
-    - cron: "30 0 * * 6"      # JST Saturday 09:30 domestic
+    # 23:00 UTC = 08:00 JST next day: daily core routes
+    - cron: "0 23 * * *"
+
+    # 23:30 UTC = 08:30 JST next day: daily global routes
+    - cron: "30 23 * * *"
+
+    # 00:00 UTC Saturday = 09:00 JST Saturday: weekly report
+    - cron: "0 0 * * 6"
+
+    # 00:30 UTC Saturday = 09:30 JST Saturday: weekly domestic routes
+    - cron: "30 0 * * 6"
+
   workflow_dispatch:
     inputs:
       mode:
@@ -26,11 +34,17 @@ on:
           - domestic-force-alerts
           - dry-run
 
+concurrency:
+  group: flight-price-monitor-state
+  cancel-in-progress: false
+
 jobs:
   monitor:
     runs-on: ubuntu-latest
+
     permissions:
       contents: write
+
     env:
       SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
       TRAVELPAYOUTS_TOKEN: ${{ secrets.TRAVELPAYOUTS_TOKEN }}
@@ -38,16 +52,24 @@ jobs:
       AMADEUS_CLIENT_SECRET: ${{ secrets.AMADEUS_CLIENT_SECRET }}
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-python@v5
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
       - name: Install dependencies
         run: pip install -r requirements.txt
+
+      - name: Sync latest state
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git pull --rebase
 
       - name: Decide command
         id: decide
@@ -61,56 +83,72 @@ jobs:
                 command="python flight_price_monitor.py --config flight_price_config.yaml --weekly-report"
                 commit_state=false
                 ;;
+
               global)
                 command="python flight_price_monitor.py --config flight_price_config.yaml --global-only"
                 ;;
+
               domestic)
                 command="python flight_price_monitor.py --config flight_price_config.yaml --domestic-only"
                 ;;
+
               all)
                 command="python flight_price_monitor.py --config flight_price_config.yaml"
                 ;;
+
               core-force)
                 command="python flight_price_monitor.py --config flight_price_config.yaml --core-only --force"
                 ;;
+
               global-force)
                 command="python flight_price_monitor.py --config flight_price_config.yaml --global-only --force"
                 ;;
+
               domestic-force)
                 command="python flight_price_monitor.py --config flight_price_config.yaml --domestic-only --force"
                 ;;
+
               core-force-alerts)
                 command="python flight_price_monitor.py --config flight_price_config.yaml --core-only --force --force-alerts"
                 ;;
+
               global-force-alerts)
                 command="python flight_price_monitor.py --config flight_price_config.yaml --global-only --force --force-alerts"
                 ;;
+
               domestic-force-alerts)
                 command="python flight_price_monitor.py --config flight_price_config.yaml --domestic-only --force --force-alerts"
                 ;;
+
               dry-run)
                 command="python flight_price_monitor.py --config flight_price_config.yaml --core-only --link-only --dry-run"
                 commit_state=false
                 ;;
+
               core|*)
                 command="python flight_price_monitor.py --config flight_price_config.yaml --core-only"
                 ;;
             esac
+
           else
             case "${{ github.event.schedule }}" in
               "0 23 * * *")
                 command="python flight_price_monitor.py --config flight_price_config.yaml --core-only"
                 ;;
+
               "30 23 * * *")
                 command="python flight_price_monitor.py --config flight_price_config.yaml --global-only"
                 ;;
+
               "0 0 * * 6")
                 command="python flight_price_monitor.py --config flight_price_config.yaml --weekly-report"
                 commit_state=false
                 ;;
+
               "30 0 * * 6")
                 command="python flight_price_monitor.py --config flight_price_config.yaml --domestic-only"
                 ;;
+
               *)
                 echo "Unknown schedule: ${{ github.event.schedule }}"
                 exit 1
@@ -120,6 +158,7 @@ jobs:
 
           echo "command=$command" >> "$GITHUB_OUTPUT"
           echo "commit_state=$commit_state" >> "$GITHUB_OUTPUT"
+
           echo "Selected command: $command"
           echo "Commit state: $commit_state"
 
@@ -138,7 +177,12 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          git pull --rebase
           git add flight_price_state.json
-          git diff --cached --quiet || git commit -m "update flight price state"
+
+          if git diff --cached --quiet; then
+            echo "No state changes to commit."
+            exit 0
+          fi
+
+          git commit -m "update flight price state"
           git push
