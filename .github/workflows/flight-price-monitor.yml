@@ -34,6 +34,9 @@ on:
           - domestic-force-alerts
           - dry-run
 
+permissions:
+  contents: write
+
 concurrency:
   group: flight-price-monitor-state
   cancel-in-progress: false
@@ -41,9 +44,6 @@ concurrency:
 jobs:
   monitor:
     runs-on: ubuntu-latest
-
-    permissions:
-      contents: write
 
     env:
       SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
@@ -55,6 +55,8 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
+          token: ${{ github.token }}
+          persist-credentials: true
           fetch-depth: 0
 
       - name: Set up Python
@@ -63,13 +65,17 @@ jobs:
           python-version: "3.11"
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
 
       - name: Sync latest state
+        shell: bash
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git pull --rebase
+
+          git pull --rebase origin "${GITHUB_REF_NAME}"
 
       - name: Decide command
         id: decide
@@ -185,4 +191,4 @@ jobs:
           fi
 
           git commit -m "update flight price state"
-          git push
+          git push origin HEAD:"${GITHUB_REF_NAME}"
