@@ -31,12 +31,12 @@ smtp:
   host: smtp.gmail.com
   port: 587
   use_tls: true
-  username: your_email@example.com
+  username: hailuwang71@gmail.com
 
 email:
-  from: your_email@example.com
+  from: hailuwang71@gmail.com
   to:
-    - your_email@example.com
+    - hailuwang71@gmail.com
 
 thresholds:
   pullback_min_pct: 20
