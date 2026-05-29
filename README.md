@@ -1,191 +1,226 @@
-# Flight Price Monitor
+# Japan Stock Monitor
 
-安全优先的 Python 3 机票价格监控脚本，适合放在 GitHub Actions 定时运行。
+Python 3 script for post-close monitoring of Japanese stocks using `yfinance`.
 
-本项目不是自动购票工具：不会自动下单、不会保存支付信息、不会登录网站、不会绕过验证码，也不会爬取 Google Flights / Skyscanner / Trip.com / 携程 / 飞猪等动态网页。
+This project is an investment watchlist reminder tool. It is not an automated trading system, does not connect to broker APIs, does not place orders, and does not provide deterministic buy/sell instructions. Every email is an observation or risk-review prompt that requires human confirmation.
 
-## 数据源策略
-
-- Travelpayouts / Aviasales Data API：主要真实价格源，返回缓存价格。
-- Amadeus：可选真实价格源，默认关闭。
-- Google Flights / Skyscanner / Trip.com / 携程 / 飞猪 / 航司官网：只生成人工确认链接，不自动抓价。
-
-Travelpayouts 返回的是缓存数据，不保证实时、不保证最终含税价、不保证包含托运行李。最终价格、转机次数、行李、税费、退改签和签证要求都必须人工确认。
-
-## 转机限制
-
-默认配置：
-
-```yaml
-settings:
-  max_stops: 1
-  direct_only: false
-  allow_unknown_stops: true
-```
-
-含义：
-
-- `max_stops: 0`：只接受直飞。
-- `max_stops: 1`：最多一次转机。
-- `max_stops: 2`：最多两次转机。
-- `direct_only: true`：等价于 `max_stops: 0`。
-- `allow_unknown_stops: true`：如果 API 没返回可判断的转机次数，保留报价，但邮件中标注“转机次数需人工确认”。
-- `allow_unknown_stops: false`：无法判断转机次数的报价会被丢弃。
-
-Travelpayouts 的 `direct` 参数只能区分“只直飞”和“不限制直飞”，不能 100% 原生保证“最多一次转机”。脚本会尽量从 `transfers`、`number_of_changes`、`stops`、`segments`、`route` 等字段解析转机次数；能解析就过滤，不能解析就按 `allow_unknown_stops` 决定保留或丢弃。
-
-Amadeus 如果启用，会向 Flight Offers Search 传入 `maxStops`，并从 `itineraries / segments` 判断转机次数。它的转机判断通常比 Travelpayouts 缓存 API 更可靠。
-
-Google Flights / Trip.com / 携程 / 飞猪 / Skyscanner 等人工确认链接仍需手动确认转机次数、行李、税费和最终价格。直飞模式下，Google Flights 查询词会追加 `nonstop`，但仍需人工确认。
-
-## 当前监控策略
-
-当前 Travelpayouts 配置：
-
-```yaml
-sources:
-  travelpayouts:
-    max_requests_per_run: 300
-    pause_every_requests: 80
-    pause_seconds: 5
-    retry_attempts: 3
-    retry_base_sleep_seconds: 2
-```
-
-大致候选数量：
-
-- `core-only`: 48
-- `domestic-only`: 144
-- `global-only`: 352
-- `all`: 544
-
-建议日常分开运行，不建议把 `all` 作为每天自动任务。
-
-价格模式：
-
-- `domestic`：使用 Travelpayouts `prices_for_dates`，精确日期缓存报价。
-- `core`：先用 `prices_for_dates` 查精确日期；没有报价时 fallback 到 `get_latest_prices` flexible cached low-price。
-- `global`：使用 `get_latest_prices` flexible cached latest price，适合发现低价机会，不代表精确日期实时价格。
-- `manual`：人工确认链接。
-
-## 提醒规则
-
-强提醒：
-
-- 低于路线目标价。
-- 明显降价。
-- 异常低价。
-- 东京-西安节假日重点低价。
-
-观察提醒：
-
-```yaml
-settings:
-  watch_price_alert_enabled: true
-  watch_price_margin_pct: 25
-```
-
-如果价格没有低于目标价，但在 `threshold_jpy * 1.25` 内，会发送 `【机票观察】`。观察提醒参与去重，避免每天重复提醒。
-
-邮件标题和正文以中文为主。邮件正文会显示：
-
-- 价格模式。
-- 原始候选日期和 flexible cached 实际低价日期。
-- 配置的最大转机次数。
-- API 返回转机次数。
-- 转机判断状态：已确认 / 需人工确认 / 无法确认。
-
-如果 `Priced results > 0` 但 `Alert emails prepared = 0`，通常说明价格未达到目标价、观察价阈值或降价规则，或者被重复提醒控制抑制。
-
-如果出现 `rate_limited`，建议降低 `max_requests_per_run`、增大 `pause_seconds`，或继续分批运行。
-
-## GitHub Secrets
-
-在仓库 `Settings -> Secrets and variables -> Actions -> Repository secrets` 中设置：
-
-- `SMTP_PASSWORD`: Gmail App Password，用于发送邮件。
-- `TRAVELPAYOUTS_TOKEN`: Travelpayouts / Aviasales Data API token。
-
-可选：
-
-- `AMADEUS_CLIENT_ID`
-- `AMADEUS_CLIENT_SECRET`
-
-## GitHub Actions
-
-`.github/workflows/flight-price-monitor.yml` 使用 UTC cron：
-
-- `23:00 UTC` = 日本时间次日 `08:00`，每天运行核心路线。
-- `23:30 UTC` = 日本时间次日 `08:30`，每天运行全球路线。
-- `00:00 UTC Saturday` = 日本时间周六 `09:00`，发送周报。
-- `00:30 UTC Saturday` = 日本时间周六 `09:30`，每周运行日本国内路线。
-
-手动测试同一天重复运行：
-
-- `core-force`
-- `global-force`
-- `domestic-force`
-
-测试邮件并临时绕过 7 天重复提醒：
-
-- `core-force-alerts`
-- `global-force-alerts`
-- `domestic-force-alerts`
-
-## 本地运行
+## Local Usage
 
 ```bash
 pip install -r requirements.txt
-python flight_price_monitor.py --config flight_price_config.yaml --dry-run --core-only --link-only
-python flight_price_monitor.py --config flight_price_config.yaml --weekly-report --dry-run
+export SMTP_PASSWORD="your-smtp-app-password"
+python stock_monitor.py
+python stock_monitor.py --dry-run --report
+python stock_monitor.py --summary-email
+python stock_monitor.py --test-email
+python stock_monitor.py --export-signals
+python stock_monitor.py --signal-log stock_signal_log.csv
 ```
 
-Linux / macOS:
-
-```bash
-export SMTP_PASSWORD="your_gmail_app_password"
-export TRAVELPAYOUTS_TOKEN="your_token"
-```
-
-Windows PowerShell:
+On Windows PowerShell:
 
 ```powershell
-$env:SMTP_PASSWORD="your_gmail_app_password"
-$env:TRAVELPAYOUTS_TOKEN="your_token"
+$env:SMTP_PASSWORD="your-smtp-app-password"
+python stock_monitor.py --dry-run --report
+python stock_monitor.py --dry-run --log-signals-dry-run
 ```
 
-## Cron 示例
+Edit `config.yaml` for the stock pool, sector classification, SMTP settings, recipients, and alert thresholds. The SMTP password is read from the `SMTP_PASSWORD` environment variable.
 
-如果服务器时区是日本时间：
+## GitHub Actions
 
-```cron
-0 8 * * * cd /path/to/repo && /usr/bin/python3 flight_price_monitor.py --config flight_price_config.yaml --core-only
-30 8 * * * cd /path/to/repo && /usr/bin/python3 flight_price_monitor.py --config flight_price_config.yaml --global-only
-0 9 * * 6 cd /path/to/repo && /usr/bin/python3 flight_price_monitor.py --config flight_price_config.yaml --weekly-report
-30 9 * * 6 cd /path/to/repo && /usr/bin/python3 flight_price_monitor.py --config flight_price_config.yaml --domestic-only
+The workflow file must be placed at:
+
+```text
+.github/workflows/japan-stock-monitor.yml
 ```
 
-## 限制
+GitHub scheduled workflows only run on the default branch. GitHub Actions schedules can be delayed and may occasionally miss a run, so this project uses a primary schedule plus a backup schedule:
 
-“最多一次转机”在 Travelpayouts 上不一定能 100% 保证，因为缓存 API 可能不返回完整航段。最稳的做法是：能解析就过滤，不能解析就邮件标注“需人工确认”。
+- JST 17:17 on weekdays
+- JST 18:47 on weekdays as backup
 
-## 去重与路线归属
+The cron values are UTC:
 
-东京-西安是核心路线，只由 `core` 模式负责提醒。`global_routes` 不再包含 `Tokyo-Xian`，避免每天 JST 08:00 的 core 任务和 JST 08:30 的 global 任务重复发送同一条东京-西安邮件。
+```yaml
+schedule:
+  - cron: "17 8 * * 1-5"
+  - cron: "47 9 * * 1-5"
+```
 
-GitHub Actions 的日常安排：
-- `core`: 每天 JST 08:00 运行东京-西安核心路线。
-- `global`: 每天 JST 08:30 运行全球低价路线，不包含东京-西安。
-- `weekly`: 每周六 JST 09:00 发送周报。
-- `domestic`: 每周六 JST 09:30 运行日本国内线。
+Manual `workflow_dispatch` modes:
 
-`flight_price_state.json` 会在 core / global / domestic / all 正常运行后由 workflow commit 回仓库，用来在不同 GitHub Actions run 之间共享提醒去重记录。`weekly-report`、`dry-run` 和测试邮件不会 commit state。
+- `normal`: `python stock_monitor.py`
+- `dry-run`: `python stock_monitor.py --dry-run --report`
+- `report`: `python stock_monitor.py --report`
+- `test-email`: `python stock_monitor.py --test-email`
+- `summary-email`: `python stock_monitor.py --summary-email`
 
-脚本还会写入跨模式去重 key。同一路线、同目的地、同出发日期、同返回日期、同单程/往返类型，在不同 source、不同 origin 或不同 scope 下不会重复提醒；如果价格再次明显下降，仍可按照 `significant_drop_repeat_pct` 再次提醒。
+## Research Priority And Risk Layers
 
-如果又收到重复邮件，优先检查：
-- 仓库里是否存在多个 workflow 文件同时运行。
-- 是否手动运行了 `core-force-alerts` 或 `global-force-alerts`。
-- `global_routes` 是否又加入了 `Tokyo-Xian` 或其他核心路线。
-- `flight_price_state.json` 是否成功由 GitHub Actions commit。
-- `settings.fail_on_route_overlap` 是否需要临时改成 `true` 来让重复配置直接失败。
+The script now treats `A / B / C` as research priority, not buy ratings:
+
+- `A`: high research priority. Technical setup and theme logic look stronger, but valuation, earnings, and position size still require manual confirmation.
+- `B`: watchlist candidate. Some conditions are met, but it is not an automatic buy signal.
+- `C`: low priority for now. Trend, theme, relative strength, or risk conditions are not attractive enough.
+
+Every stock alert separates:
+
+- Technical status: drawdown, 20/50/200-day moving averages, distance from the 200-day average, reentry above the 200-day average, and trend class.
+- Theme relevance: high / medium / low, with the company-theme connection such as AI data centers, optical communication, power equipment, cooling systems, semiconductor equipment, server supply chain, or industrial/auto power devices.
+- Valuation risk: PER, PBR, PSR, EV/EBITDA, ROE, operating margin, and 5-year valuation percentile fields are shown. When data is unavailable, the email explicitly says valuation data is insufficient and must be checked manually.
+- Fundamental confirmation: revenue, operating profit, net profit, guidance revision, margin, free cash flow, and order/theme demand fields are shown. When data is unavailable, the email asks the user to review latest 決算短信 / 有価証券報告書 / 決算説明資料.
+- Position feasibility: the script calculates one trading unit as 100 shares by default, one-lot amount, and one-lot percentage of configured investable capital.
+
+Position configuration:
+
+```yaml
+user_profile:
+  investable_capital_jpy: 10000000
+  single_stock_initial_limit_pct: 1.5
+  single_stock_max_limit_pct: 3.0
+  allow_odd_lot: false
+```
+
+If one lot is above the configured limit, the email says the stock is too large for a direct one-lot entry unless using 単元未満株 / S株 / small amount buying. This is an observation and position-risk prompt, not a trading instruction.
+
+## Email Policy
+
+The default email policy is summary-first to reduce inbox noise:
+
+```yaml
+email_policy:
+  daily_summary_default: true
+  send_individual_alerts: true
+  notify_action_levels:
+    - A
+    - B
+  send_summary_when_no_notify_alerts: false
+  individual_alert_types:
+    - weak_deep_pullback
+    - pullback_but_overheated
+    - breakout_but_overheated
+    - pullback_watch
+    - deep_pullback_trend_intact
+  send_sector_heat_individual: false
+```
+
+Normal runs send one daily summary by default only when there are notify-level signals. Individual stock emails are sent only for higher-priority combined signals. `overheat_risk`, `trend_weakness`, and `sector_heat` are still recorded in the CSV and logs, but they do not send separate emails and do not appear in the ordinary daily summary by default.
+
+The ordinary scheduled notification now focuses on A/B research-priority levels. C signals are still recorded in `stock_signal_log.csv` and logs, but they do not appear in the normal daily notification. To restore C-level emails and summary entries, add `C` to `notify_action_levels`.
+
+Daily runs are deduplicated in `alert_state.json` under `daily_runs` by JST date. The primary and backup schedules can both exist, but after one normal run completes, the backup run exits without sending mail. The workflow pulls the latest branch state before running the script and uses GitHub Actions concurrency to avoid overlapping monitor runs on the same branch.
+
+## State Handling
+
+`dry-run` does not save `alert_state.json` and will not pollute deduplication state.
+
+The workflow commits `alert_state.json` back to the repository after normal runs. This is more stable for long-running monitoring than relying on GitHub Actions cache. `dry-run`, `report`, `test-email`, and `summary-email` do not commit state.
+
+The workflow commits both `alert_state.json` and `stock_signal_log.csv` after normal runs. It still uploads `monitor.log`, `alert_state.json`, and `stock_signal_log.csv` as artifacts for debugging.
+
+## Signal CSV Log
+
+`stock_signal_log.csv` records combined stock alerts for later review. Each row is one script-generated combined stock signal, not one raw alert. For example, if `pullback_watch` and `overheat_risk` fire on the same stock, the CSV records one `pullback_but_overheated` row and keeps `raw_alerts` as `pullback_watch;overheat_risk`.
+
+The CSV is meant for a 6-month review process:
+
+- It records the signal date and technical context at the time of the alert.
+- It leaves manual review columns blank for Google Sheets or Excel.
+- It leaves future performance columns blank for a later backfill script.
+- It is independent from email delivery, so a signal can be recorded even if SMTP fails.
+
+Configuration:
+
+```yaml
+signal_log:
+  enabled: true
+  path: stock_signal_log.csv
+  append_only: true
+```
+
+Commands:
+
+```bash
+python stock_monitor.py
+python stock_monitor.py --dry-run --report
+python stock_monitor.py --dry-run --log-signals-dry-run
+python stock_monitor.py --export-signals
+python stock_monitor.py --signal-log stock_signal_log.csv
+```
+
+`dry-run` does not write `stock_signal_log.csv` by default. Add `--log-signals-dry-run` only when you intentionally want to test CSV writing.
+
+Suggested review labels:
+
+- `good_signal`
+- `bad_signal`
+- `neutral`
+- `avoided_loss`
+- `false_positive`
+
+How to evaluate later:
+
+- For candidate/recovery signals, review 1-month and 3-month relative return versus TOPIX.
+- For risk and weakness signals, check whether the stock continued to underperform TOPIX.
+- For overheat signals, check whether the stock pulled back within 1 month.
+
+## Backfill Signal Results
+
+`backfill_signal_results.py` fills future performance fields in `stock_signal_log.csv` after enough time has passed.
+
+```bash
+python backfill_signal_results.py
+python backfill_signal_results.py --dry-run
+python backfill_signal_results.py --overwrite
+python backfill_signal_results.py --signal-log stock_signal_log.csv
+```
+
+It backfills:
+
+- 1 week, 1 month, 3 month, and 6 month forward price and return
+- TOPIX return for the same windows
+- Relative return versus TOPIX
+- 1 month and 3 month maximum gain/drawdown
+- `result_label`
+
+`result_label` is a first-pass classification:
+
+- Candidate/recovery signals become `good_signal` if later relative performance is strong, `bad_signal` if clearly weak, otherwise `neutral`.
+- Risk/weakness/overheat signals become `avoided_loss` if the stock later underperforms or draws down, `false_positive` if it strongly outperforms, otherwise `neutral`.
+
+The backfill script is for review only. It does not change alerts, send emails, connect to brokers, or trade.
+
+## No Alert Email
+
+Not receiving an alert email does not necessarily mean the job failed. It can also mean that no stock met the configured conditions.
+
+To verify execution:
+
+- Check the GitHub Actions log.
+- Run `mode=report` to print the indicator table.
+- Run `mode=summary-email` to receive a daily run summary, including "今日无触发提醒" when nothing triggered.
+
+## Combined Alerts
+
+Each stock sends at most one combined alert per run. Raw alert signals are preserved in the email body, but conflicting signals are merged into a single cautious conclusion.
+
+Examples:
+
+- `pullback_watch` + `overheat_risk` becomes `回撤后修复，但短线过热`
+- `deep_pullback_trend_intact` + `trend_weakness` becomes `深度回撤但趋势转弱，谨慎复查`
+- `breakout_strength` + `overheat_risk` becomes `强势突破但短线过热`
+
+The goal is to avoid contradictory emails such as "buy candidate" and "avoid chasing" for the same stock on the same day.
+
+## Safety Boundary
+
+This project does not:
+
+- Connect to broker APIs
+- Place orders
+- Perform automatic trading
+- Provide definitive investment advice
+- Encourage high-frequency trading
+
+All outputs are observation, review, risk-warning, or candidate-research prompts. Human confirmation is required.
