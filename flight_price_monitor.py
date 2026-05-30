@@ -1851,6 +1851,7 @@ def build_run_summary(
     alerts_to_send: list[dict[str, Any]],
     scope: str,
     config: dict[str, Any],
+    link_only: bool = False,
 ) -> str:
     settings = config.get("settings", {})
     watch_margin = float(settings.get("watch_price_margin_pct", 25))
@@ -1877,6 +1878,7 @@ def build_run_summary(
         "## Flight Price Monitor Summary",
         "",
         f"- Mode: `{scope}`",
+        f"- Run type: `{'link-only/manual links only' if link_only else 'price-api enabled'}`",
         f"- Candidate searches: `{len(candidates)}`",
         f"- Source checks / links generated: `{len(source_results)}`",
         f"- Priced results: `{priced_count}`",
@@ -1978,10 +1980,19 @@ def build_run_summary(
             f"Travelpayouts returned rate_limited for {rate_limited_count} requests. Consider reducing max_requests_per_run or increasing pause_seconds.",
         ]
     if not alerts_to_send:
-        lines += [
-            "",
-            "No alert email was sent/prepared. If `Priced results` is `0`, check `Source statuses`; if `Priced results` is greater than `0`, prices did not meet threshold/watch threshold/drop rules or were suppressed by dedup.",
-        ]
+        lines += ["", "### No alert email was sent/prepared"]
+        if link_only:
+            lines.append(
+                "This run used `--link-only`, so it generated manual-check links only and intentionally did not call Travelpayouts/Amadeus price APIs. `Priced results: 0` is expected in this mode."
+            )
+        elif priced_count == 0:
+            lines.append(
+                "`Priced results` is `0` even though price APIs were enabled. Check `Source statuses` and Travelpayouts/Amadeus credentials or API availability."
+            )
+        else:
+            lines.append(
+                "Priced results were found, but prices did not meet threshold/watch threshold/drop rules or were suppressed by dedup."
+            )
     return "\n".join(lines)
 
 
@@ -2188,7 +2199,15 @@ def main() -> int:
     all_alerts_to_send = alerts_to_send + friend_alerts_to_send
 
     logging.info("Prepared %d alert email(s).", len(all_alerts_to_send))
-    summary = build_run_summary(all_candidates, all_source_results, all_evaluated_alerts, all_alerts_to_send, scope, config)
+    summary = build_run_summary(
+        all_candidates,
+        all_source_results,
+        all_evaluated_alerts,
+        all_alerts_to_send,
+        scope,
+        config,
+        link_only=args.link_only,
+    )
     logging.info("\n%s", summary)
     publish_github_step_summary(summary)
 
