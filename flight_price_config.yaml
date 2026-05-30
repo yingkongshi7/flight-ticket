@@ -26,6 +26,9 @@ email:
 
 settings:
   currency: JPY
+  # Core price API runs ignore too-soon departures by default.
+  # 3 means: on 2026-05-30, core only checks flights departing from 2026-06-02 onward.
+  core_min_departure_days: 3
   # Weekly report hides same-day departures by default.
   # 1 means: on 2026-05-30, only show flights departing from 2026-05-31 onward.
   weekly_min_departure_days: 1
@@ -38,6 +41,10 @@ settings:
     - google_flights
     - travelpayouts
     - skyscanner
+  # Fallback routes are Tokyo -> China gateway cities, not Tokyo -> Xian full itinerary.
+  # <=70,000 JPY is an alert; 70,001-84,000 JPY is a watch candidate.
+  core_fallback_alert_jpy: 70000
+  core_fallback_watch_jpy: 84000
   dedup_days: 7
   price_drop_alert_pct: 15
   significant_drop_repeat_pct: 10
@@ -72,7 +79,8 @@ core_fallback_routes:
     origin_codes: ["NRT"]
     destination_codes: ["PEK", "PKX"]
     trip_type: "roundtrip"
-    normal_threshold_jpy: 45000
+    normal_threshold_jpy: 70000
+    watch_threshold_jpy: 84000
     golden_week_threshold_jpy: 75000
     year_end_threshold_jpy: 75000
     spring_festival_threshold_jpy: 75000
@@ -81,7 +89,8 @@ core_fallback_routes:
     origin_codes: ["NRT"]
     destination_codes: ["PVG", "SHA"]
     trip_type: "roundtrip"
-    normal_threshold_jpy: 45000
+    normal_threshold_jpy: 70000
+    watch_threshold_jpy: 84000
     golden_week_threshold_jpy: 75000
     year_end_threshold_jpy: 75000
     spring_festival_threshold_jpy: 75000
@@ -90,7 +99,8 @@ core_fallback_routes:
     origin_codes: ["NRT"]
     destination_codes: ["CAN"]
     trip_type: "roundtrip"
-    normal_threshold_jpy: 50000
+    normal_threshold_jpy: 70000
+    watch_threshold_jpy: 84000
     golden_week_threshold_jpy: 80000
     year_end_threshold_jpy: 80000
     spring_festival_threshold_jpy: 80000
@@ -99,7 +109,8 @@ core_fallback_routes:
     origin_codes: ["NRT"]
     destination_codes: ["TFU", "CTU"]
     trip_type: "roundtrip"
-    normal_threshold_jpy: 50000
+    normal_threshold_jpy: 70000
+    watch_threshold_jpy: 84000
     golden_week_threshold_jpy: 80000
     year_end_threshold_jpy: 80000
     spring_festival_threshold_jpy: 80000

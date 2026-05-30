@@ -52,6 +52,7 @@ WEEKLY_GROUPS = [
 
 CATEGORY_LABELS_ZH = {
     "Core China": "核心路线 / 中国大陆",
+    "Core China Fallback": "核心路线 / 中国中转备选",
     "China / HK / Taiwan": "中国大陆 / 港澳台",
     "Southeast Asia": "东南亚",
     "Northeast Asia": "东北亚",
@@ -549,6 +550,29 @@ def get_weekly_min_departure_days(config: dict[str, Any]) -> int:
         return 1
 
 
+def get_core_min_departure_days(config: dict[str, Any]) -> int:
+    settings = config.get("settings", {}) or {}
+    try:
+        return int(settings.get("core_min_departure_days", 3))
+    except (TypeError, ValueError):
+        return 3
+
+
+def is_core_fallback_candidate(c: "SearchCandidate") -> bool:
+    return str(c.destination_category) == "Core China Fallback" or "-via-" in str(c.route_name)
+
+
+def watch_threshold_for_candidate(c: "SearchCandidate", config: dict[str, Any]) -> int:
+    settings = config.get("settings", {}) or {}
+    if is_core_fallback_candidate(c):
+        try:
+            return int(c.route_config.get("watch_threshold_jpy", settings.get("core_fallback_watch_jpy", 84000)))
+        except (TypeError, ValueError):
+            return 84000
+    watch_margin = float(settings.get("watch_price_margin_pct", 25))
+    return int(round(c.threshold_jpy * (1 + watch_margin / 100)))
+
+
 def configured_max_stops(config: dict[str, Any]) -> int:
     settings = config.get("settings", {})
     if settings.get("direct_only", False):
@@ -592,13 +616,17 @@ def default_regular_trips(today: dt.date, trip_type: str) -> list[dict[str, str]
 
 
 def threshold_for_route(route: dict[str, Any], window_key: str) -> int:
-    if route.get("destination_category") == "Core China":
+    if route.get("destination_category") in {"Core China", "Core China Fallback"}:
         mapping = {
             "golden_week": "golden_week_threshold_jpy",
             "year_end": "year_end_threshold_jpy",
             "spring_festival": "spring_festival_threshold_jpy",
         }
-        return int(route.get(mapping.get(window_key, "normal_threshold_jpy"), route.get("normal_threshold_jpy", 40000)))
+        if route.get("destination_category") == "Core China Fallback":
+            default_threshold = 70000
+        else:
+            default_threshold = 40000
+        return int(route.get(mapping.get(window_key, "normal_threshold_jpy"), route.get("normal_threshold_jpy", default_threshold)))
     return int(route.get("threshold_jpy", route.get("normal_threshold_jpy", 999999)))
 
 
@@ -669,6 +697,9 @@ def generate_candidate_searches(
             for origin in origins:
                 for destination in destinations:
                     for window_key, window_label, trip in trips:
+                        if is_core and not is_future_departure({"depart_date": str(trip["depart"])}, today=today, min_days=get_core_min_departure_days(config)):
+                            logging.info("Skip too-soon core trip: route=%s depart=%s", route.get("name"), trip.get("depart"))
+                            continue
                         candidates.append(
                             SearchCandidate(
                                 route_name=route["name"],
@@ -977,13 +1008,15 @@ def fetch_travelpayouts_price(result: SourceResult, config: dict[str, Any]) -> S
     offers: list[tuple[int, int | None, str]] = []
     filtered_by_stops = 0
     today = dt.date.today()
+    min_days = get_core_min_departure_days(config) if str(result.candidate.destination_category).startswith("Core China") else 0
+    earliest_departure = today + dt.timedelta(days=max(0, min_days))
     for item in data:
         if not isinstance(item, dict):
             continue
         depart = item.get("depart_date") or item.get("departure_at")
         if depart:
             try:
-                if dt.date.fromisoformat(str(depart)[:10]) < today:
+                if dt.date.fromisoformat(str(depart)[:10]) < earliest_departure:
                     continue
             except ValueError:
                 continue
@@ -1038,13 +1071,15 @@ def should_use_travelpayouts_core_fallback(c: SearchCandidate, config: dict[str,
 def travelpayouts_flexible_params(c: SearchCandidate, config: dict[str, Any]) -> dict[str, Any]:
     source_cfg = (config.get("sources") or {}).get("travelpayouts", {})
     today = dt.date.today()
+    min_days = get_core_min_departure_days(config) if str(c.destination_category).startswith("Core China") else 0
+    search_start = today + dt.timedelta(days=max(0, min_days))
     params: dict[str, Any] = {
         "origin": c.origin,
         "destination": c.destination,
         "currency": source_cfg.get("currency", "jpy"),
-        # Start from today, not the first day of the month. Otherwise flexible cached
-        # results can include already-expired fares near month end.
-        "beginning_of_period": today.isoformat(),
+        # Start from the effective earliest acceptable date. For core routes this
+        # avoids same-day/tomorrow cached fares that are not actionable.
+        "beginning_of_period": search_start.isoformat(),
         "period_type": source_cfg.get("flexible_period_type", "month"),
         "group_by": "dates",
         "one_way": "true" if c.trip_type == "oneway" else "false",
@@ -1094,13 +1129,15 @@ def fetch_travelpayouts_flexible_price(result: SourceResult, config: dict[str, A
     best_stops_status = "manual_check_required"
     filtered_by_stops = 0
     today = dt.date.today()
+    min_days = get_core_min_departure_days(config) if str(result.candidate.destination_category).startswith("Core China") else 0
+    earliest_departure = today + dt.timedelta(days=max(0, min_days))
     for item in data:
         if not isinstance(item, dict):
             continue
         depart = item.get("depart_date") or item.get("departure_at")
         if depart:
             try:
-                if dt.date.fromisoformat(str(depart)[:10]) < today:
+                if dt.date.fromisoformat(str(depart)[:10]) < earliest_departure:
                     continue
             except ValueError:
                 continue
@@ -1335,8 +1372,7 @@ def evaluate_price_alert(result: SourceResult, state: dict[str, Any], config: di
     drop_pct = percent_drop(previous_price, result.price_jpy)
     threshold = c.threshold_jpy
     below_threshold = result.price_jpy is not None and result.price_jpy <= threshold
-    watch_margin = float(settings.get("watch_price_margin_pct", 25))
-    watch_threshold = int(round(threshold * (1 + watch_margin / 100)))
+    watch_threshold = watch_threshold_for_candidate(c, config)
     watch_enabled = bool(settings.get("watch_price_alert_enabled", True))
     watch_price = bool(
         watch_enabled
@@ -1351,7 +1387,7 @@ def evaluate_price_alert(result: SourceResult, state: dict[str, Any], config: di
         abnormal = abnormal or result.price_jpy <= int(c.route_config["abnormal_jpy"])
     very_cheap = bool(c.route_config.get("very_cheap_jpy") and result.price_jpy is not None and result.price_jpy <= int(c.route_config["very_cheap_jpy"]))
     holiday_core = c.is_core_route and c.window_key != "normal"
-    focus = holiday_core and result.price_jpy is not None and result.price_jpy <= 70000
+    focus = holiday_core and not is_core_fallback_candidate(c) and result.price_jpy is not None and result.price_jpy <= 70000
 
     alert_needed = bool(result.price_jpy is not None and (below_threshold or obvious_drop or abnormal or focus or watch_price))
     return {
@@ -1478,6 +1514,11 @@ def build_alert_subject(alert: dict[str, Any]) -> str:
     c = r.candidate
     route = route_label_zh(c.route_name, c)
     date_part = c.depart_date
+    if is_core_fallback_candidate(c):
+        if alert["below_threshold"]:
+            return f"【中转备选】东京到中国入口城市低于目标价｜{route}｜{format_price(r.price_jpy)}｜{date_part}"
+        if alert["watch_price"]:
+            return f"【中转备选观察】东京到中国入口城市接近目标价｜{route}｜{format_price(r.price_jpy)}｜{date_part}"
     if alert["abnormal"]:
         return f"【异常低价】{route}｜{format_price(r.price_jpy)}｜{date_part}"
     if alert["below_threshold"]:
@@ -1496,6 +1537,9 @@ def build_alert_email(alert: dict[str, Any]) -> tuple[str, str, str]:
     c = r.candidate
     subject = build_alert_subject(alert)
     actions = []
+    if is_core_fallback_candidate(c):
+        actions.append("这是东京到中国入口城市价格，不是东京-西安全程价格。")
+        actions.append("需要人工确认中国国内段/高铁/联程风险/行李，再判断是否适合去西安。")
     if alert["below_threshold"]:
         actions.append("价格低于目标价，建议尽快人工确认最终价格、行李、税费、退改签和转机时间。")
     if alert["watch_price"] and not alert["below_threshold"]:
@@ -1520,6 +1564,10 @@ def build_alert_email(alert: dict[str, Any]) -> tuple[str, str, str]:
         f"- 返回日期：{c.return_date or '-'}",
         f"- 单程/往返：{'单程' if c.trip_type == 'oneway' else '往返'}",
         f"- 目的地分类：{category_label_zh(c.destination_category)}",
+        *([
+            "- 中转备选说明：这是东京到中国入口城市价格，不是东京-西安全程价格。",
+            "- 必须人工确认：中国国内段/高铁/联程风险/行李/税费/转机时间。",
+        ] if is_core_fallback_candidate(c) else []),
         "",
         "价格信息",
         f"- 当前价格：{format_price(r.price_jpy)}",
@@ -1679,7 +1727,7 @@ def build_core_manual_report_email(config: dict[str, Any]) -> tuple[str, str, st
     """
     subject = "【机票周报】东京-西安人工确认链接"
     today = dt.date.today()
-    min_departure_days = get_weekly_min_departure_days(config)
+    min_departure_days = get_core_min_departure_days(config)
     preferred_sources = set(core_manual_report_sources(config))
     total_limit = max(0, get_core_manual_report_limit(config))
     direct_limit = max(0, get_core_manual_direct_limit(config))
@@ -1745,7 +1793,8 @@ def build_core_manual_report_email(config: dict[str, Any]) -> tuple[str, str, st
         f"# {subject}",
         "",
         "说明：这封邮件不依赖 Travelpayouts 是否抓到缓存价格；它专门提供东京-西安及中国中转备选路线的人工确认链接。",
-        "人工打开链接时请重点确认最终价格、转机次数、行李、税费，以及中转城市到西安的二段交通。",
+        "中转备选说明：这是东京到中国入口城市价格，不是东京-西安全程价格。",
+        "人工打开链接时请重点确认最终价格、转机次数、行李、税费、中国国内段/高铁/联程风险，以及中转城市到西安的二段交通。",
         "",
     ]
 
@@ -2040,6 +2089,9 @@ def build_run_summary(
     lines += [
         "",
         "### Stop filtering",
+        f"- Core min departure days: `{get_core_min_departure_days(config)}`",
+        f"- Core fallback alert threshold: `{format_price(int(settings.get('core_fallback_alert_jpy', 70000)))}`",
+        f"- Core fallback watch threshold: `{format_price(int(settings.get('core_fallback_watch_jpy', 84000)))}`",
         f"- Max stops configured: `{configured_max_stops(config)}`",
         f"- Allow unknown stops: `{str(allow_unknown_stops(config)).lower()}`",
         f"- Confirmed nonstop results: `{nonstop_count}`",
@@ -2074,7 +2126,7 @@ def build_run_summary(
         for result in unique_display_results(priced_results)[:10]:
             c = result.candidate
             route_dates = f"{c.depart_date}" if not c.return_date else f"{c.depart_date} -> {c.return_date}"
-            watch_threshold = int(round(c.threshold_jpy * (1 + watch_margin / 100)))
+            watch_threshold = watch_threshold_for_candidate(c, config)
             if result.price_jpy is not None and result.price_jpy <= c.threshold_jpy:
                 price_status = "below_threshold"
             elif result.price_jpy is not None and result.price_jpy <= watch_threshold:

@@ -227,3 +227,28 @@ Expected behavior:
 - `Run type: price-api enabled` means the API path is enabled.
 - `travelpayouts:no_price` means Travelpayouts was called but returned no cached priced offers.
 - `Core China Fallback` rows mean the script also checked China gateway fallback routes.
+
+## 2026-05-30 v6: Core fallback rules
+
+Core price runs use `settings.core_min_departure_days: 3`, so same-day/tomorrow departures are ignored for core routes and Travelpayouts flexible fallback.
+
+Core fallback routes are not Tokyo-Xian full itineraries. They are Tokyo -> China gateway city prices, intended for manual judgment before separately checking the China domestic segment or high-speed rail to Xian.
+
+Fallback alert rules:
+
+- `<= 70,000 JPY`: alert
+- `70,001-84,000 JPY`: watch
+- `> 84,000 JPY`: usually no alert unless another rule applies
+
+Relevant settings:
+
+```yaml
+settings:
+  core_min_departure_days: 3
+  core_fallback_alert_jpy: 70000
+  core_fallback_watch_jpy: 84000
+```
+
+Every fallback alert email explicitly reminds you:
+
+> This is a Tokyo -> China gateway city price, not a Tokyo -> Xian full itinerary. Check the China domestic segment / high-speed rail / self-transfer risk / baggage manually.
