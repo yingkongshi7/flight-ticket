@@ -484,8 +484,20 @@ def prune_state(state: dict[str, Any], keep_days: int = 30, dedup_days: int = 7)
         filtered = [item for item in items if str(item.get("date", "")) >= cutoff]
         return filtered[-limit:]
 
-    state["manual_check_links"] = recent_items(state.get("manual_check_links", []), 1000)
-    state["weekly_drops"] = recent_items(state.get("weekly_drops", []), 500)
+    def recent_future_items(items: list[dict[str, Any]], limit: int) -> list[dict[str, Any]]:
+        filtered = [item for item in recent_items(items, limit * 2) if is_future_departure(item, today=today)]
+        return filtered[-limit:]
+
+    state["manual_check_links"] = recent_future_items(state.get("manual_check_links", []), 1000)
+    state["weekly_drops"] = recent_future_items(state.get("weekly_drops", []), 500)
+
+    latest_prices = state.get("latest_prices", {})
+    if isinstance(latest_prices, dict):
+        state["latest_prices"] = {
+            key: value
+            for key, value in latest_prices.items()
+            if isinstance(value, dict) and is_future_departure(value, today=today)
+        }
 
     alerts = state.get("alerts", {})
     if isinstance(alerts, dict):
@@ -499,6 +511,23 @@ def prune_state(state: dict[str, Any], keep_days: int = 30, dedup_days: int = 7)
 
 def parse_date(value: str) -> dt.date:
     return dt.date.fromisoformat(str(value))
+
+
+def date_from_item(item: dict[str, Any], key: str = "depart_date") -> dt.date | None:
+    value = item.get(key)
+    if not value:
+        return None
+    try:
+        return dt.date.fromisoformat(str(value)[:10])
+    except ValueError:
+        return None
+
+
+def is_future_departure(item: dict[str, Any], *, today: dt.date | None = None) -> bool:
+    depart_date = date_from_item(item, "depart_date")
+    if depart_date is None:
+        return False
+    return depart_date >= (today or dt.date.today())
 
 
 def configured_max_stops(config: dict[str, Any]) -> int:
@@ -556,13 +585,23 @@ def threshold_for_route(route: dict[str, Any], window_key: str) -> int:
 
 def enabled_date_window_trips(config: dict[str, Any]) -> list[tuple[str, str, dict[str, str]]]:
     trips: list[tuple[str, str, dict[str, str]]] = []
+    today = dt.date.today()
     for key, window in (config.get("date_windows") or {}).items():
         if window.get("enabled", True) is False:
             continue
         label = window.get("label", key)
         for trip in window.get("candidate_trips") or []:
-            if trip.get("depart"):
-                trips.append((key, label, trip))
+            depart = trip.get("depart")
+            if not depart:
+                continue
+            try:
+                if dt.date.fromisoformat(str(depart)[:10]) < today:
+                    logging.info("Skip expired configured trip: window=%s depart=%s", key, depart)
+                    continue
+            except ValueError:
+                logging.warning("Skip invalid configured trip date: window=%s depart=%s", key, depart)
+                continue
+            trips.append((key, label, trip))
     return trips
 
 
@@ -916,9 +955,17 @@ def fetch_travelpayouts_price(result: SourceResult, config: dict[str, Any]) -> S
 
     offers: list[tuple[int, int | None, str]] = []
     filtered_by_stops = 0
+    today = dt.date.today()
     for item in data:
         if not isinstance(item, dict):
             continue
+        depart = item.get("depart_date") or item.get("departure_at")
+        if depart:
+            try:
+                if dt.date.fromisoformat(str(depart)[:10]) < today:
+                    continue
+            except ValueError:
+                continue
         allowed, stops, stops_status = stops_allowed_for_item(item, config)
         if not allowed:
             filtered_by_stops += 1
@@ -974,7 +1021,9 @@ def travelpayouts_flexible_params(c: SearchCandidate, config: dict[str, Any]) ->
         "origin": c.origin,
         "destination": c.destination,
         "currency": source_cfg.get("currency", "jpy"),
-        "beginning_of_period": today.replace(day=1).isoformat(),
+        # Start from today, not the first day of the month. Otherwise flexible cached
+        # results can include already-expired fares near month end.
+        "beginning_of_period": today.isoformat(),
         "period_type": source_cfg.get("flexible_period_type", "month"),
         "group_by": "dates",
         "one_way": "true" if c.trip_type == "oneway" else "false",
@@ -1023,9 +1072,17 @@ def fetch_travelpayouts_flexible_price(result: SourceResult, config: dict[str, A
     best_stops: int | None = None
     best_stops_status = "manual_check_required"
     filtered_by_stops = 0
+    today = dt.date.today()
     for item in data:
         if not isinstance(item, dict):
             continue
+        depart = item.get("depart_date") or item.get("departure_at")
+        if depart:
+            try:
+                if dt.date.fromisoformat(str(depart)[:10]) < today:
+                    continue
+            except ValueError:
+                continue
         allowed, stops, stops_status = stops_allowed_for_item(item, config)
         if not allowed:
             filtered_by_stops += 1
@@ -1491,19 +1548,55 @@ def build_alert_email(alert: dict[str, Any]) -> tuple[str, str, str]:
     return subject, "\n".join(lines), html_body
 
 
+def weekly_dedup_key(item: dict[str, Any]) -> tuple[Any, ...]:
+    return (
+        item.get("route_name"),
+        item.get("destination_category"),
+        item.get("depart_date"),
+        item.get("return_date"),
+        item.get("price_jpy"),
+        item.get("stops"),
+    )
+
+
+def dedup_weekly_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    seen: set[tuple[Any, ...]] = set()
+    deduped: list[dict[str, Any]] = []
+    for item in sorted(items, key=lambda x: (x.get("price_jpy", 10**12), str(x.get("query_link", "")))):
+        key = weekly_dedup_key(item)
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(item)
+    return deduped
+
+
 def build_weekly_report_email(state: dict[str, Any], config: dict[str, Any]) -> tuple[str, str, str]:
     subject = "【机票周报】低价路线与人工确认链接"
     latest_prices = state.get("latest_prices", {})
-    manual_links = state.get("manual_check_links", [])
-    drops = sorted(state.get("weekly_drops", []), key=lambda x: x.get("drop_pct", 0), reverse=True)[:5]
+    if not isinstance(latest_prices, dict):
+        latest_prices = {}
+    today = dt.date.today()
+    manual_links = [
+        item for item in state.get("manual_check_links", [])
+        if isinstance(item, dict) and is_future_departure(item, today=today)
+    ]
+    drops = dedup_weekly_items([
+        item for item in state.get("weekly_drops", [])
+        if isinstance(item, dict) and is_future_departure(item, today=today)
+    ])
+    drops = sorted(drops, key=lambda x: x.get("drop_pct", 0), reverse=True)[:5]
 
     sections: list[str] = [f"# {subject}", ""]
     for title, categories in WEEKLY_GROUPS:
         rows = [
             item for item in latest_prices.values()
-            if item.get("destination_category") in categories and item.get("price_jpy") is not None
+            if isinstance(item, dict)
+            and item.get("destination_category") in categories
+            and item.get("price_jpy") is not None
+            and is_future_departure(item, today=today)
         ]
-        rows = sorted(rows, key=lambda x: x.get("price_jpy", 10**12))[:5]
+        rows = dedup_weekly_items(rows)[:5]
         sections += [f"## {title}"]
         if not rows:
             sections.append("- 暂无可用抓价结果。")
