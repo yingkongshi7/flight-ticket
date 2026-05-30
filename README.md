@@ -189,3 +189,41 @@ GitHub Actions 的日常安排：
 - `global_routes` 是否又加入了 `Tokyo-Xian` 或其他核心路线。
 - `flight_price_state.json` 是否成功由 GitHub Actions commit。
 - `settings.fail_on_route_overlap` 是否需要临时改成 `true` 来让重复配置直接失败。
+
+## 2026-05-30 v5: Core manual weekly report and Xian fallback routes
+
+### Core manual weekly report
+
+Use this when Travelpayouts often returns `no_price` for Tokyo-Xian but you still want actionable manual-confirmation links:
+
+```bash
+python flight_price_monitor.py --config flight_price_config.yaml --core-manual-report --dry-run
+```
+
+In GitHub Actions, select `core-manual-weekly` from `workflow_dispatch`, or let the scheduled job run every Saturday 09:15 JST.
+
+The report includes:
+
+- Tokyo-Xian direct searches: `TYO/HND/NRT -> XIY`
+- China transfer fallback routes for manual judgment:
+  - `NRT -> PEK/PKX`
+  - `NRT -> PVG/SHA`
+  - `NRT -> CAN`
+  - `NRT -> TFU/CTU`
+
+For fallback routes, manually check whether the total itinerary is practical after adding the China domestic segment to Xian.
+
+### Real price API core test
+
+Do not add `--link-only` if you want to test real Travelpayouts pricing:
+
+```bash
+export TRAVELPAYOUTS_TOKEN="your_token"
+python flight_price_monitor.py --config flight_price_config.yaml --core-only --dry-run --force
+```
+
+Expected behavior:
+
+- `Run type: price-api enabled` means the API path is enabled.
+- `travelpayouts:no_price` means Travelpayouts was called but returned no cached priced offers.
+- `Core China Fallback` rows mean the script also checked China gateway fallback routes.

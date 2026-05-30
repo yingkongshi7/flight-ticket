@@ -37,7 +37,7 @@ AMADEUS_TOKEN_CACHE: dict[str, Any] = {}
 AMADEUS_REQUEST_COUNT = 0
 TRAVELPAYOUTS_REQUEST_COUNT = 0
 WEEKLY_GROUPS = [
-    ("核心路线：东京-西安", ["Core China"]),
+    ("核心路线：东京-西安 / 中转备选", ["Core China", "Core China Fallback"]),
     ("中国大陆 / 港澳台低价", ["China / HK / Taiwan"]),
     ("东南亚低价", ["Southeast Asia"]),
     ("东北亚低价", ["Northeast Asia"]),
@@ -168,6 +168,10 @@ AIRPORT_LABELS_ZH = {
 
 ROUTE_SUFFIX_LABELS_ZH = {
     "Xian": "西安",
+    "Xian-via-Beijing": "西安中转备选：北京",
+    "Xian-via-Shanghai": "西安中转备选：上海",
+    "Xian-via-Guangzhou": "西安中转备选：广州",
+    "Xian-via-Chengdu": "西安中转备选：成都",
     "Sapporo": "札幌",
     "Okinawa": "冲绳",
     "Fukuoka": "福冈",
@@ -420,7 +424,7 @@ def load_config(path: str | Path) -> dict[str, Any]:
 
 
 def validate_config(config: dict[str, Any]) -> None:
-    for section in ("core_routes", "domestic_routes", "global_routes"):
+    for section in ("core_routes", "core_fallback_routes", "domestic_routes", "global_routes"):
         for route in config.get(section, []) or []:
             origins = set(route.get("origin_codes", []))
             forbidden = sorted(origins & FORBIDDEN_ORIGINS)
@@ -633,6 +637,7 @@ def generate_candidate_searches(
     route_groups: list[tuple[str, list[dict[str, Any]]]] = []
     if core_only:
         route_groups.append(("core", config.get("core_routes", [])))
+        route_groups.append(("core_fallback", config.get("core_fallback_routes", [])))
     elif domestic_only:
         route_groups.append(("domestic", config.get("domestic_routes", [])))
     elif global_only:
@@ -641,6 +646,7 @@ def generate_candidate_searches(
         route_groups.extend(
             [
                 ("core", config.get("core_routes", [])),
+                ("core_fallback", config.get("core_fallback_routes", [])),
                 ("domestic", config.get("domestic_routes", [])),
                 ("global", config.get("global_routes", [])),
             ]
@@ -652,7 +658,7 @@ def generate_candidate_searches(
             origins = route.get("origin_codes", [])
             destinations = route.get("destination_codes", [])
             trip_type = route.get("trip_type", "roundtrip")
-            is_core = group_name == "core" or route.get("destination_category") == "Core China"
+            is_core = group_name in {"core", "core_fallback"} or str(route.get("destination_category", "")).startswith("Core China")
 
             trips: list[tuple[str, str, dict[str, str]]]
             if is_core:
@@ -1026,7 +1032,7 @@ def should_use_travelpayouts_flexible(c: SearchCandidate, config: dict[str, Any]
 
 def should_use_travelpayouts_core_fallback(c: SearchCandidate, config: dict[str, Any]) -> bool:
     source_cfg = (config.get("sources") or {}).get("travelpayouts", {})
-    return bool(source_cfg.get("flexible_core_fallback", True) and c.destination_category == "Core China")
+    return bool(source_cfg.get("flexible_core_fallback", True) and str(c.destination_category).startswith("Core China"))
 
 
 def travelpayouts_flexible_params(c: SearchCandidate, config: dict[str, Any]) -> dict[str, Any]:
@@ -1630,6 +1636,144 @@ def get_weekly_manual_link_limit(config: dict[str, Any]) -> int:
         return 20
 
 
+
+def get_core_manual_report_limit(config: dict[str, Any]) -> int:
+    settings = config.get("settings", {}) or {}
+    try:
+        return int(settings.get("core_manual_report_limit", 40))
+    except (TypeError, ValueError):
+        return 40
+
+
+def get_core_manual_direct_limit(config: dict[str, Any]) -> int:
+    settings = config.get("settings", {}) or {}
+    try:
+        return int(settings.get("core_manual_direct_limit", 18))
+    except (TypeError, ValueError):
+        return 18
+
+
+def get_core_manual_fallback_limit(config: dict[str, Any]) -> int:
+    settings = config.get("settings", {}) or {}
+    try:
+        return int(settings.get("core_manual_fallback_limit", 22))
+    except (TypeError, ValueError):
+        return 22
+
+
+def core_manual_report_sources(config: dict[str, Any]) -> list[str]:
+    settings = config.get("settings", {}) or {}
+    sources = settings.get("core_manual_report_sources", ["google_flights", "travelpayouts", "skyscanner"])
+    if isinstance(sources, str):
+        sources = [sources]
+    return [str(source) for source in sources if source]
+
+
+def build_core_manual_report_email(config: dict[str, Any]) -> tuple[str, str, str]:
+    """Build a weekly manual-confirmation report for the core Xian route.
+
+    This report does not depend on cached API prices. It intentionally lists
+    manual check links for Tokyo-Xian plus configured China transfer fallback
+    cities, so the user still gets actionable links when Travelpayouts returns
+    no cached offers for XIY.
+    """
+    subject = "【机票周报】东京-西安人工确认链接"
+    today = dt.date.today()
+    min_departure_days = get_weekly_min_departure_days(config)
+    preferred_sources = set(core_manual_report_sources(config))
+    total_limit = max(0, get_core_manual_report_limit(config))
+    direct_limit = max(0, get_core_manual_direct_limit(config))
+    fallback_limit = max(0, get_core_manual_fallback_limit(config))
+
+    candidates = [
+        c for c in generate_candidate_searches(config, core_only=True)
+        if is_future_departure({"depart_date": c.depart_date}, today=today, min_days=min_departure_days)
+    ]
+
+    rows: list[dict[str, Any]] = []
+    seen: set[tuple[Any, ...]] = set()
+    for candidate in sorted(candidates, key=lambda c: (c.destination_category, c.depart_date, c.return_date or "", c.route_name, c.origin, c.destination)):
+        for source_result in build_source_links(candidate, config):
+            if preferred_sources and source_result.source_name not in preferred_sources:
+                continue
+            key = (
+                candidate.route_name,
+                candidate.origin,
+                candidate.destination,
+                candidate.depart_date,
+                candidate.return_date,
+                source_result.source_name,
+            )
+            if key in seen:
+                continue
+            seen.add(key)
+            rows.append({
+                "route_name": candidate.route_name,
+                "category": candidate.destination_category,
+                "origin": candidate.origin,
+                "destination": candidate.destination,
+                "depart_date": candidate.depart_date,
+                "return_date": candidate.return_date,
+                "source_name": source_result.source_name,
+                "query_link": source_result.query_link,
+            })
+
+    rows = sorted(
+        rows,
+        key=lambda x: (
+            0 if x.get("category") == "Core China" else 1,
+            str(x.get("depart_date", "")),
+            str(x.get("route_name", "")),
+            manual_source_priority(x.get("source_name")),
+            str(x.get("origin", "")),
+            str(x.get("destination", "")),
+        ),
+    )
+    direct_rows_all = [row for row in rows if row.get("category") == "Core China"]
+    fallback_rows_all = [row for row in rows if row.get("category") != "Core China"]
+    direct_rows = direct_rows_all[:direct_limit]
+    fallback_rows = fallback_rows_all[:fallback_limit]
+    if total_limit:
+        overflow = max(0, len(direct_rows) + len(fallback_rows) - total_limit)
+        if overflow:
+            if len(fallback_rows) > max(0, fallback_limit - overflow):
+                fallback_rows = fallback_rows[:max(0, len(fallback_rows) - overflow)]
+            else:
+                direct_rows = direct_rows[:max(0, total_limit - len(fallback_rows))]
+
+    sections: list[str] = [
+        f"# {subject}",
+        "",
+        "说明：这封邮件不依赖 Travelpayouts 是否抓到缓存价格；它专门提供东京-西安及中国中转备选路线的人工确认链接。",
+        "人工打开链接时请重点确认最终价格、转机次数、行李、税费，以及中转城市到西安的二段交通。",
+        "",
+    ]
+
+    sections.append("## 东京-西安直搜")
+    if not direct_rows:
+        sections.append("- 暂无可用人工确认链接。")
+    for row in direct_rows:
+        sections.append(
+            f"- {route_label_zh(row.get('route_name'))} {row.get('origin')}→{row.get('destination')} "
+            f"{row.get('depart_date')}~{row.get('return_date') or '-'} "
+            f"{manual_source_label_zh(row.get('source_name'))} {row.get('query_link')}"
+        )
+
+    sections += ["", "## 中国中转备选（到达后人工判断是否适合转西安）"]
+    if not fallback_rows:
+        sections.append("- 暂无可用人工确认链接。")
+    for row in fallback_rows:
+        sections.append(
+            f"- {route_label_zh(row.get('route_name'))} {row.get('origin')}→{row.get('destination')} "
+            f"{row.get('depart_date')}~{row.get('return_date') or '-'} "
+            f"{manual_source_label_zh(row.get('source_name'))} {row.get('query_link')}"
+        )
+
+    text = "\n".join(sections)
+    html_body = "<br>".join(html.escape(line) for line in sections)
+    return subject, text, html_body
+
+
 def build_weekly_report_email(state: dict[str, Any], config: dict[str, Any]) -> tuple[str, str, str]:
     subject = "【机票周报】低价路线与人工确认链接"
     latest_prices = state.get("latest_prices", {})
@@ -2111,6 +2255,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--test-email", action="store_true")
     parser.add_argument("--weekly-report", action="store_true")
+    parser.add_argument("--core-manual-report", action="store_true")
     parser.add_argument("--core-only", action="store_true")
     parser.add_argument("--domestic-only", action="store_true")
     parser.add_argument("--global-only", action="store_true")
@@ -2146,6 +2291,14 @@ def main() -> int:
             print(text)
         else:
             send_email(config, subject, text, html_body, to=recipients_for_scope(config, scope, weekly_report=True))
+        return 0
+
+    if args.core_manual_report:
+        subject, text, html_body = build_core_manual_report_email(config)
+        if dry_run:
+            print(text)
+        else:
+            send_email(config, subject, text, html_body, to=recipients_for_scope(config, "core"))
         return 0
 
     run_key = f"last_{scope}_run_date"
