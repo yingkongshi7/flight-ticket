@@ -81,9 +81,9 @@ core_fallback_routes:
     trip_type: "roundtrip"
     normal_threshold_jpy: 70000
     watch_threshold_jpy: 84000
-    golden_week_threshold_jpy: 75000
-    year_end_threshold_jpy: 75000
-    spring_festival_threshold_jpy: 75000
+    golden_week_threshold_jpy: 70000
+    year_end_threshold_jpy: 70000
+    spring_festival_threshold_jpy: 70000
   - name: "Tokyo-Xian-via-Shanghai"
     destination_category: "Core China Fallback"
     origin_codes: ["NRT"]
@@ -91,9 +91,9 @@ core_fallback_routes:
     trip_type: "roundtrip"
     normal_threshold_jpy: 70000
     watch_threshold_jpy: 84000
-    golden_week_threshold_jpy: 75000
-    year_end_threshold_jpy: 75000
-    spring_festival_threshold_jpy: 75000
+    golden_week_threshold_jpy: 70000
+    year_end_threshold_jpy: 70000
+    spring_festival_threshold_jpy: 70000
   - name: "Tokyo-Xian-via-Guangzhou"
     destination_category: "Core China Fallback"
     origin_codes: ["NRT"]
@@ -101,9 +101,9 @@ core_fallback_routes:
     trip_type: "roundtrip"
     normal_threshold_jpy: 70000
     watch_threshold_jpy: 84000
-    golden_week_threshold_jpy: 80000
-    year_end_threshold_jpy: 80000
-    spring_festival_threshold_jpy: 80000
+    golden_week_threshold_jpy: 70000
+    year_end_threshold_jpy: 70000
+    spring_festival_threshold_jpy: 70000
   - name: "Tokyo-Xian-via-Chengdu"
     destination_category: "Core China Fallback"
     origin_codes: ["NRT"]
@@ -111,9 +111,9 @@ core_fallback_routes:
     trip_type: "roundtrip"
     normal_threshold_jpy: 70000
     watch_threshold_jpy: 84000
-    golden_week_threshold_jpy: 80000
-    year_end_threshold_jpy: 80000
-    spring_festival_threshold_jpy: 80000
+    golden_week_threshold_jpy: 70000
+    year_end_threshold_jpy: 70000
+    spring_festival_threshold_jpy: 70000
 
 domestic_routes:
   - {name: "Tokyo-Sapporo", destination_category: "Domestic Japan", origin_codes: ["TYO", "HND", "NRT"], destination_codes: ["CTS"], trip_type: "oneway", threshold_jpy: 7200}

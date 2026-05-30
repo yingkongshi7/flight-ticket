@@ -252,3 +252,18 @@ settings:
 Every fallback alert email explicitly reminds you:
 
 > This is a Tokyo -> China gateway city price, not a Tokyo -> Xian full itinerary. Check the China domestic segment / high-speed rail / self-transfer risk / baggage manually.
+
+
+### Core China Fallback threshold rule
+
+Core China Fallback routes are Tokyo -> China gateway city checks, not Tokyo -> Xian full-itinerary prices.
+
+Default rule:
+
+- <= 70,000 JPY: alert
+- 70,001-84,000 JPY: watch
+- > 84,000 JPY: no threshold/watch alert unless other drop rules apply
+
+The email body explicitly reminds the user:
+
+> This is a Tokyo-to-China-gateway price, not a Tokyo-to-Xian full-itinerary price. Manually confirm the China domestic flight/train segment, self-transfer risk, baggage, and taxes before deciding.

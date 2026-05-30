@@ -617,16 +617,18 @@ def default_regular_trips(today: dt.date, trip_type: str) -> list[dict[str, str]
 
 def threshold_for_route(route: dict[str, Any], window_key: str) -> int:
     if route.get("destination_category") in {"Core China", "Core China Fallback"}:
+        # Core fallback routes are Tokyo -> China gateway prices, not Tokyo -> Xian full-itinerary prices.
+        # Keep one simple fallback threshold across all date windows: <=70,000 JPY alerts,
+        # and watch_threshold_for_candidate() handles the 70,001-84,000 JPY watch band.
+        if route.get("destination_category") == "Core China Fallback":
+            return int(route.get("normal_threshold_jpy", 70000))
+
         mapping = {
             "golden_week": "golden_week_threshold_jpy",
             "year_end": "year_end_threshold_jpy",
             "spring_festival": "spring_festival_threshold_jpy",
         }
-        if route.get("destination_category") == "Core China Fallback":
-            default_threshold = 70000
-        else:
-            default_threshold = 40000
-        return int(route.get(mapping.get(window_key, "normal_threshold_jpy"), route.get("normal_threshold_jpy", default_threshold)))
+        return int(route.get(mapping.get(window_key, "normal_threshold_jpy"), route.get("normal_threshold_jpy", 40000)))
     return int(route.get("threshold_jpy", route.get("normal_threshold_jpy", 999999)))
 
 
