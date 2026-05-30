@@ -315,6 +315,12 @@ def source_label_zh(source_name: str | None) -> str:
     return SOURCE_LABELS_ZH.get(source, source)
 
 
+def manual_source_label_zh(source_name: str | None) -> str:
+    if source_name == "travelpayouts":
+        return "Travelpayouts / Aviasales 人工确认链接"
+    return source_label_zh(source_name)
+
+
 def price_mode_label_zh(price_mode: str | None) -> str:
     if not price_mode:
         return "未知模式"
@@ -523,11 +529,20 @@ def date_from_item(item: dict[str, Any], key: str = "depart_date") -> dt.date | 
         return None
 
 
-def is_future_departure(item: dict[str, Any], *, today: dt.date | None = None) -> bool:
+def is_future_departure(item: dict[str, Any], *, today: dt.date | None = None, min_days: int = 0) -> bool:
     depart_date = date_from_item(item, "depart_date")
     if depart_date is None:
         return False
-    return depart_date >= (today or dt.date.today())
+    base_date = today or dt.date.today()
+    return depart_date >= (base_date + dt.timedelta(days=max(0, min_days)))
+
+
+def get_weekly_min_departure_days(config: dict[str, Any]) -> int:
+    settings = config.get("settings", {}) or {}
+    try:
+        return int(settings.get("weekly_min_departure_days", 1))
+    except (TypeError, ValueError):
+        return 1
 
 
 def configured_max_stops(config: dict[str, Any]) -> int:
@@ -1571,19 +1586,64 @@ def dedup_weekly_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return deduped
 
 
+def weekly_manual_link_key(item: dict[str, Any]) -> tuple[Any, ...]:
+    return (
+        item.get("route_name"),
+        item.get("depart_date"),
+        item.get("return_date"),
+    )
+
+
+def manual_source_priority(source_name: str | None) -> int:
+    priority = {
+        "google_flights": 0,
+        "skyscanner": 1,
+        "trip_com": 2,
+        "travelpayouts": 3,
+        "ctrip": 4,
+        "fliggy": 5,
+    }
+    return priority.get(str(source_name), 99)
+
+
+def dedup_weekly_manual_links(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    best: dict[tuple[Any, ...], dict[str, Any]] = {}
+    for item in sorted(
+        items,
+        key=lambda x: (
+            str(x.get("depart_date", "")),
+            str(x.get("route_name", "")),
+            manual_source_priority(x.get("source_name")),
+            str(x.get("query_link", "")),
+        ),
+    ):
+        key = weekly_manual_link_key(item)
+        best.setdefault(key, item)
+    return list(best.values())
+
+
+def get_weekly_manual_link_limit(config: dict[str, Any]) -> int:
+    settings = config.get("settings", {}) or {}
+    try:
+        return int(settings.get("weekly_manual_link_limit", 20))
+    except (TypeError, ValueError):
+        return 20
+
+
 def build_weekly_report_email(state: dict[str, Any], config: dict[str, Any]) -> tuple[str, str, str]:
     subject = "【机票周报】低价路线与人工确认链接"
     latest_prices = state.get("latest_prices", {})
     if not isinstance(latest_prices, dict):
         latest_prices = {}
     today = dt.date.today()
-    manual_links = [
+    min_departure_days = get_weekly_min_departure_days(config)
+    manual_links = dedup_weekly_manual_links([
         item for item in state.get("manual_check_links", [])
-        if isinstance(item, dict) and is_future_departure(item, today=today)
-    ]
+        if isinstance(item, dict) and is_future_departure(item, today=today, min_days=min_departure_days)
+    ])
     drops = dedup_weekly_items([
         item for item in state.get("weekly_drops", [])
-        if isinstance(item, dict) and is_future_departure(item, today=today)
+        if isinstance(item, dict) and is_future_departure(item, today=today, min_days=min_departure_days)
     ])
     drops = sorted(drops, key=lambda x: x.get("drop_pct", 0), reverse=True)[:5]
 
@@ -1594,7 +1654,7 @@ def build_weekly_report_email(state: dict[str, Any], config: dict[str, Any]) -> 
             if isinstance(item, dict)
             and item.get("destination_category") in categories
             and item.get("price_jpy") is not None
-            and is_future_departure(item, today=today)
+            and is_future_departure(item, today=today, min_days=min_departure_days)
         ]
         rows = dedup_weekly_items(rows)[:5]
         sections += [f"## {title}"]
@@ -1621,8 +1681,10 @@ def build_weekly_report_email(state: dict[str, Any], config: dict[str, Any]) -> 
         sections.append(f"- {route_label_zh(item.get('route_name'))} 降价 {item.get('drop_pct')}% 当前 {format_price(item.get('price_jpy'))} {item.get('query_link')}")
 
     sections += ["", "## 需要人工确认的路线链接", "以下链接不会自动抓价，需要人工确认价格、转机次数、行李和税费。"]
-    for item in manual_links[-50:]:
-        sections.append(f"- {route_label_zh(item.get('route_name'))} {source_label_zh(item.get('source_name'))} {item.get('depart_date')} {item.get('query_link')}")
+    manual_link_limit = max(0, get_weekly_manual_link_limit(config))
+    manual_links_for_display = sorted(manual_links, key=lambda x: (str(x.get('depart_date', '')), str(x.get('route_name', '')), manual_source_priority(x.get('source_name'))))[:manual_link_limit]
+    for item in manual_links_for_display:
+        sections.append(f"- {route_label_zh(item.get('route_name'))} {manual_source_label_zh(item.get('source_name'))} {item.get('depart_date')} {item.get('query_link')}")
     if not manual_links:
         sections.append("- 暂无。")
 
