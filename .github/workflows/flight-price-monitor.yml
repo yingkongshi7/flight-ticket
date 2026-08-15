@@ -11,6 +11,9 @@ on:
     # 00:00 UTC Saturday = 09:00 JST Saturday: weekly report
     - cron: "0 0 * * 6"
 
+    # 00:15 UTC Saturday = 09:15 JST Saturday: core manual-confirmation links
+    - cron: "15 0 * * 6"
+
     # 00:30 UTC Saturday = 09:30 JST Saturday: weekly domestic routes
     - cron: "30 0 * * 6"
 
@@ -23,6 +26,7 @@ on:
         options:
           - core
           - weekly
+          - core-manual-weekly
           - global
           - domestic
           - all
@@ -69,6 +73,9 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: Run unit tests
+        run: python -m unittest discover -s tests -v
+
       - name: Sync latest state
         shell: bash
         run: |
@@ -87,6 +94,11 @@ jobs:
             case "${{ inputs.mode }}" in
               weekly)
                 command="python flight_price_monitor.py --config flight_price_config.yaml --weekly-report"
+                commit_state=false
+                ;;
+
+              core-manual-weekly)
+                command="python flight_price_monitor.py --config flight_price_config.yaml --core-manual-report"
                 commit_state=false
                 ;;
 
@@ -151,6 +163,11 @@ jobs:
                 commit_state=false
                 ;;
 
+              "15 0 * * 6")
+                command="python flight_price_monitor.py --config flight_price_config.yaml --core-manual-report"
+                commit_state=false
+                ;;
+
               "30 0 * * 6")
                 command="python flight_price_monitor.py --config flight_price_config.yaml --domestic-only"
                 ;;
@@ -172,7 +189,7 @@ jobs:
         run: ${{ steps.decide.outputs.command }}
 
       - name: Commit state
-        if: steps.decide.outputs.commit_state == 'true'
+        if: always() && steps.decide.outputs.commit_state == 'true'
         shell: bash
         run: |
           if [ ! -f flight_price_state.json ]; then
