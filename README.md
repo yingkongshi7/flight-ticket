@@ -75,32 +75,30 @@ sources:
 
 ## 提醒规则
 
-强提醒：
+当前策略以减少无效邮件为优先：
 
-- 低于路线目标价。
-- 明显降价。
-- 异常低价。
-- 东京-西安节假日重点低价。
-
-观察提醒：
+- **即时邮件只在 `price <= threshold_jpy` 时发送。**
+- 观察区为 `threshold_jpy < price <= threshold_jpy * 1.08`。
+- 观察区不会发送即时邮件，只写入 state、GitHub Actions Summary 和周报。
+- 明显降价、节假日重点、异常标记等仍会记录；只要价格仍高于目标价，就不会因为这些标记单独发即时邮件。
+- 价格刚好等于目标价视为达到目标，会发送。
 
 ```yaml
 settings:
-  watch_price_alert_enabled: true
-  watch_price_margin_pct: 25
+  watch_price_tracking_enabled: true
+  email_below_target_only: true
+  watch_price_margin_pct: 8
 ```
 
-如果价格没有低于目标价，但在 `threshold_jpy * 1.25` 内，会发送 `【机票观察】`。观察提醒参与去重，避免每天重复提醒。
+例如目标价为 `70,000 JPY`：
 
-邮件标题和正文以中文为主。邮件正文会显示：
+- `<= 70,000`: 立即邮件。
+- `70,001-75,600`: 观察区，只进周报/趋势。
+- `> 75,600`: 普通价格，仅保留正常历史记录。
 
-- 价格模式。
-- 原始候选日期和 flexible cached 实际低价日期。
-- 配置的最大转机次数。
-- API 返回转机次数。
-- 转机判断状态：已确认 / 需人工确认 / 无法确认。
+邮件正文仍会显示价格模式、候选日期、最大转机次数、API 返回转机次数和人工确认提示。
 
-如果 `Priced results > 0` 但 `Alert emails prepared = 0`，通常说明价格未达到目标价、观察价阈值或降价规则，或者被重复提醒控制抑制。
+如果 `Priced results > 0` 但 `Alert emails prepared = 0`，通常表示本轮没有任何价格达到目标价，或者达到目标价的结果被重复提醒规则抑制。观察区结果可在 GitHub Summary 的 `Watch-price results` 和周报的“接近目标价”部分查看。
 
 如果出现 `rate_limited`，优先增大 `min_request_interval_seconds` 或 `pause_seconds`。脚本当前会限速，避免 global 全量查询在一分钟内过快请求。
 
@@ -173,7 +171,7 @@ $env:TRAVELPAYOUTS_TOKEN="your_token"
 
 ## 朋友国内线的发送逻辑
 
-朋友国内线只在价格达到提醒规则时发送，不会每周固定发送“没有低价”的邮件。当前规则仍然是：往返目标价 = 国内单程阈值 × 2，观察价再按全局 `watch_price_margin_pct` 放宽。
+朋友国内线只在**往返价格达到往返目标价**时发送，不会因为进入观察区就发即时邮件。往返目标价 = 国内单程阈值 × 2；观察上限 = 往返目标价 × 1.08，仅用于 state / GitHub Summary / 周报。
 
 2026-08-15 的历史 state 显示，当天朋友版 144 个旧版精确往返查询全部是 `no_price`，而自己的单程仍有有效价格。这说明主要问题是精确往返缓存命中率，而不是朋友邮箱配置。修正版默认只用 `TYO` 生成 48 个朋友候选，并在精确往返无缓存时按候选月份 fallback。GitHub Step Summary 里会额外显示 `Friend domestic round-trip diagnostics`，方便确认朋友版到底抓到了多少价格、准备了多少提醒。
 
@@ -255,11 +253,11 @@ Core price runs use `settings.core_min_departure_days: 3`, so same-day/tomorrow 
 
 Core fallback routes are not Tokyo-Xian full itineraries. They are Tokyo -> China gateway city prices, intended for manual judgment before separately checking the China domestic segment or high-speed rail to Xian.
 
-Fallback alert rules:
+Current fallback policy (v4 supersedes the old v6 email behavior):
 
-- `<= 70,000 JPY`: alert
-- `70,001-84,000 JPY`: watch
-- `> 84,000 JPY`: usually no alert unless another rule applies
+- `<= 70,000 JPY`: immediate alert
+- `70,001-75,600 JPY`: report/trend-only watch
+- `> 75,600 JPY`: no immediate alert
 
 Relevant settings:
 
@@ -267,7 +265,9 @@ Relevant settings:
 settings:
   core_min_departure_days: 3
   core_fallback_alert_jpy: 70000
-  core_fallback_watch_jpy: 84000
+  core_fallback_watch_jpy: 75600
+  email_below_target_only: true
+  watch_price_margin_pct: 8
 ```
 
 Every fallback alert email explicitly reminds you:
@@ -281,9 +281,9 @@ Core China Fallback routes are Tokyo -> China gateway city checks, not Tokyo -> 
 
 Default rule:
 
-- <= 70,000 JPY: alert
-- 70,001-84,000 JPY: watch
-- > 84,000 JPY: no threshold/watch alert unless other drop rules apply
+- <= 70,000 JPY: immediate alert
+- 70,001-75,600 JPY: report/trend-only watch
+- > 75,600 JPY: no immediate alert
 
 The email body explicitly reminds the user:
 

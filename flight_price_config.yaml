@@ -49,16 +49,18 @@ settings:
     - travelpayouts
     - skyscanner
   # Fallback routes are Tokyo -> China gateway cities, not Tokyo -> Xian full itinerary.
-  # <=70,000 JPY is an alert; 70,001-84,000 JPY is a watch candidate.
+  # <=70,000 JPY sends an immediate alert; 70,001-75,600 JPY is report/trend-only watch.
   core_fallback_alert_jpy: 70000
-  core_fallback_watch_jpy: 84000
+  core_fallback_watch_jpy: 75600
   dedup_days: 7
   price_drop_alert_pct: 15
   significant_drop_repeat_pct: 10
   abnormal_discount_pct: 20
   user_agent: "Mozilla/5.0 FlightPriceMonitor/1.0"
-  watch_price_alert_enabled: true
-  watch_price_margin_pct: 25
+  watch_price_tracking_enabled: true
+  # Immediate email is deliberately strict: only price <= target sends.
+  email_below_target_only: true
+  watch_price_margin_pct: 8
   state_keep_days: 30
   max_stops: 1
   direct_only: false
@@ -87,7 +89,7 @@ core_fallback_routes:
     destination_codes: ["PEK", "PKX"]
     trip_type: "roundtrip"
     normal_threshold_jpy: 70000
-    watch_threshold_jpy: 84000
+    watch_threshold_jpy: 75600
     golden_week_threshold_jpy: 70000
     year_end_threshold_jpy: 70000
     spring_festival_threshold_jpy: 70000
@@ -97,7 +99,7 @@ core_fallback_routes:
     destination_codes: ["PVG", "SHA"]
     trip_type: "roundtrip"
     normal_threshold_jpy: 70000
-    watch_threshold_jpy: 84000
+    watch_threshold_jpy: 75600
     golden_week_threshold_jpy: 70000
     year_end_threshold_jpy: 70000
     spring_festival_threshold_jpy: 70000
@@ -107,7 +109,7 @@ core_fallback_routes:
     destination_codes: ["CAN"]
     trip_type: "roundtrip"
     normal_threshold_jpy: 70000
-    watch_threshold_jpy: 84000
+    watch_threshold_jpy: 75600
     golden_week_threshold_jpy: 70000
     year_end_threshold_jpy: 70000
     spring_festival_threshold_jpy: 70000
@@ -117,7 +119,7 @@ core_fallback_routes:
     destination_codes: ["TFU", "CTU"]
     trip_type: "roundtrip"
     normal_threshold_jpy: 70000
-    watch_threshold_jpy: 84000
+    watch_threshold_jpy: 75600
     golden_week_threshold_jpy: 70000
     year_end_threshold_jpy: 70000
     spring_festival_threshold_jpy: 70000

@@ -571,14 +571,23 @@ def is_core_fallback_candidate(c: "SearchCandidate") -> bool:
 
 
 def watch_threshold_for_candidate(c: "SearchCandidate", config: dict[str, Any]) -> int:
+    """Return the non-email observation ceiling for a candidate.
+
+    Watch prices are intentionally *not* immediate-alert prices.  They are kept
+    for state/history, GitHub summaries and the weekly report only.
+    """
     settings = config.get("settings", {}) or {}
+    watch_margin = float(settings.get("watch_price_margin_pct", 8))
+    calculated = int(round(c.threshold_jpy * (1 + watch_margin / 100)))
+
+    # A route-specific value is still supported for compatibility, but the
+    # shipped config keeps it aligned to the same 8% policy.
     if is_core_fallback_candidate(c):
         try:
-            return int(c.route_config.get("watch_threshold_jpy", settings.get("core_fallback_watch_jpy", 84000)))
+            return int(c.route_config.get("watch_threshold_jpy", settings.get("core_fallback_watch_jpy", calculated)))
         except (TypeError, ValueError):
-            return 84000
-    watch_margin = float(settings.get("watch_price_margin_pct", 25))
-    return int(round(c.threshold_jpy * (1 + watch_margin / 100)))
+            return calculated
+    return calculated
 
 
 def configured_max_stops(config: dict[str, Any]) -> int:
@@ -626,8 +635,8 @@ def default_regular_trips(today: dt.date, trip_type: str) -> list[dict[str, str]
 def threshold_for_route(route: dict[str, Any], window_key: str) -> int:
     if route.get("destination_category") in {"Core China", "Core China Fallback"}:
         # Core fallback routes are Tokyo -> China gateway prices, not Tokyo -> Xian full-itinerary prices.
-        # Keep one simple fallback threshold across all date windows: <=70,000 JPY alerts,
-        # and watch_threshold_for_candidate() handles the 70,001-84,000 JPY watch band.
+        # Keep one simple fallback threshold across all date windows: <=70,000 JPY sends,
+        # while watch_threshold_for_candidate() tracks 70,001-75,600 JPY for reports only.
         if route.get("destination_category") == "Core China Fallback":
             return int(route.get("normal_threshold_jpy", 70000))
 
@@ -1469,9 +1478,11 @@ def evaluate_price_alert(result: SourceResult, state: dict[str, Any], config: di
     threshold = c.threshold_jpy
     below_threshold = result.price_jpy is not None and result.price_jpy <= threshold
     watch_threshold = watch_threshold_for_candidate(c, config)
-    watch_enabled = bool(settings.get("watch_price_alert_enabled", True))
+    watch_tracking_enabled = bool(
+        settings.get("watch_price_tracking_enabled", settings.get("watch_price_alert_enabled", True))
+    )
     watch_price = bool(
-        watch_enabled
+        watch_tracking_enabled
         and result.price_jpy is not None
         and not below_threshold
         and result.price_jpy <= watch_threshold
@@ -1485,7 +1496,14 @@ def evaluate_price_alert(result: SourceResult, state: dict[str, Any], config: di
     holiday_core = c.is_core_route and c.window_key != "normal"
     focus = holiday_core and not is_core_fallback_candidate(c) and result.price_jpy is not None and result.price_jpy <= 70000
 
-    alert_needed = bool(result.price_jpy is not None and (below_threshold or obvious_drop or abnormal or focus or watch_price))
+    # Production policy: immediate email is target-price only.  Watch-band,
+    # large-drop and focus flags above target are still recorded for reports,
+    # but they must not create inbox noise.
+    email_below_target_only = bool(settings.get("email_below_target_only", True))
+    if email_below_target_only:
+        alert_needed = bool(result.price_jpy is not None and below_threshold)
+    else:
+        alert_needed = bool(result.price_jpy is not None and (below_threshold or obvious_drop or abnormal or focus or watch_price))
     return {
         "result": result,
         "previous_price": previous_price,
@@ -1703,7 +1721,7 @@ def build_alert_email(alert: dict[str, Any]) -> tuple[str, str, str]:
         "价格信息",
         f"- 当前价格：{format_price(r.price_jpy)}",
         f"- 目标价：{format_price(c.threshold_jpy)}",
-        f"- 观察价阈值：{format_price(alert['watch_threshold'])}",
+        f"- 观察价阈值（仅周报/趋势，不触发即时邮件）：{format_price(alert['watch_threshold'])}",
         f"- 上次价格：{format_price(alert['previous_price'])}",
         f"- 历史最低价：{format_price(alert['history_low'])}",
         f"- 降价幅度：{alert['drop_pct'] if alert['drop_pct'] is not None else '-'}%",
@@ -1954,6 +1972,23 @@ def build_core_manual_report_email(config: dict[str, Any]) -> tuple[str, str, st
     return subject, text, html_body
 
 
+def weekly_watch_status(item: dict[str, Any]) -> bool:
+    """Re-evaluate watch status from values stored under the current policy.
+
+    Legacy state entries created before v4 do not contain threshold_jpy; those
+    are deliberately not treated as watch items until a new monitor run
+    refreshes them.  This prevents the old 20/25% watch band from leaking into
+    the new weekly report.
+    """
+    try:
+        price = int(item.get("price_jpy"))
+        target = int(item.get("threshold_jpy"))
+        watch_ceiling = int(item.get("watch_threshold"))
+    except (TypeError, ValueError):
+        return False
+    return target < price <= watch_ceiling
+
+
 def build_weekly_report_email(state: dict[str, Any], config: dict[str, Any]) -> tuple[str, str, str]:
     subject = "【机票周报】低价路线与人工确认链接"
     latest_prices = state.get("latest_prices", {})
@@ -1988,15 +2023,35 @@ def build_weekly_report_email(state: dict[str, Any], config: dict[str, Any]) -> 
             mode = price_mode_label_zh(item.get("price_mode", "unknown"))
             stops = stop_label(item.get("stops"))
             stops_status = stops_status_label(item.get("stops_status", "manual_check_required"))
+            current_watch = weekly_watch_status(item)
             sections.append(
                 f"- {route_label_zh(item.get('route_name'))} {item['depart_date']}~{item.get('return_date') or '-'} "
                 f"{format_price(item.get('price_jpy'))} {source_label_zh(item.get('source_name'))} [{mode}] "
                 f"转机={stops} 转机状态={stops_status} "
-                f"低于目标价={bool_label_zh(item.get('below_threshold'))} 观察价={bool_label_zh(item.get('watch_price'))} "
+                f"低于目标价={bool_label_zh(item.get('below_threshold'))} 观察价={bool_label_zh(current_watch)} "
                 f"明显降价={bool_label_zh(item.get('obvious_drop'))} 异常低价={bool_label_zh(item.get('abnormal'))} "
                 f"{item.get('query_link')}"
             )
         sections.append("")
+
+    watch_rows = [
+        item for item in latest_prices.values()
+        if isinstance(item, dict)
+        and item.get("price_jpy") is not None
+        and weekly_watch_status(item)
+        and is_future_departure(item, today=today, min_days=min_departure_days)
+    ]
+    watch_rows = dedup_weekly_items(watch_rows)[:10]
+    sections += ["## 接近目标价（仅观察，不发即时邮件）"]
+    if not watch_rows:
+        sections.append("- 暂无进入目标价上方 8% 观察区的路线。")
+    for item in watch_rows:
+        sections.append(
+            f"- {route_label_zh(item.get('route_name'))} {item['depart_date']}~{item.get('return_date') or '-'} "
+            f"{format_price(item.get('price_jpy'))} / 观察上限 {format_price(item.get('watch_threshold'))} "
+            f"{source_label_zh(item.get('source_name'))} {item.get('query_link')}"
+        )
+    sections.append("")
 
     sections += ["## 最近一周降价最多的路线"]
     if not drops:
@@ -2191,7 +2246,7 @@ def build_run_summary(
     link_only: bool = False,
 ) -> str:
     settings = config.get("settings", {})
-    watch_margin = float(settings.get("watch_price_margin_pct", 25))
+    watch_margin = float(settings.get("watch_price_margin_pct", 8))
     category_counts = Counter(c.destination_category for c in candidates)
     source_counts = Counter(r.source_name.split(":")[0] for r in source_results)
     priced_count = sum(1 for r in source_results if r.price_jpy is not None)
@@ -2224,7 +2279,9 @@ def build_run_summary(
         f"- Watch-price candidates before dedup: `{len(watch_candidates)}`",
         f"- Alert candidates suppressed by dedup: `{suppressed_alerts}`",
         f"- Alert emails prepared: `{len(alerts_to_send)}`",
-        f"- Watch-price emails prepared: `{len(watch_emails)}`",
+        f"- Watch-price emails prepared: `{len(watch_emails)}` (expected `0` with target-only email policy)",
+        f"- Immediate email policy: `price <= target only` = `{str(bool(settings.get('email_below_target_only', True))).lower()}`",
+        f"- Watch band: `target < price <= target x {1 + watch_margin / 100:.2f}` (report/trend only)",
         "",
         "### Categories",
     ]
@@ -2235,7 +2292,7 @@ def build_run_summary(
         "### Stop filtering",
         f"- Core min departure days: `{get_core_min_departure_days(config)}`",
         f"- Core fallback alert threshold: `{format_price(int(settings.get('core_fallback_alert_jpy', 70000)))}`",
-        f"- Core fallback watch threshold: `{format_price(int(settings.get('core_fallback_watch_jpy', 84000)))}`",
+        f"- Core fallback watch threshold: `{format_price(int(settings.get('core_fallback_watch_jpy', 75600)))}` (report/trend only)",
         f"- Max stops configured: `{configured_max_stops(config)}`",
         f"- Allow unknown stops: `{str(allow_unknown_stops(config)).lower()}`",
         f"- Confirmed nonstop results: `{nonstop_count}`",
@@ -2336,7 +2393,7 @@ def build_run_summary(
             lines += [
                 "",
                 "### No alert email was sent/prepared",
-                "Reason: priced results were found, but prices did not meet threshold/watch threshold/drop rules or were suppressed by dedup.",
+                "Reason: priced results were found, but none met the immediate-email rule (`price <= target`) or qualifying target-price alerts were suppressed by dedup.",
             ]
     return "\n".join(lines)
 
@@ -2416,6 +2473,7 @@ def update_state_for_result(state: dict[str, Any], alert: dict[str, Any]) -> Non
         "depart_date": c.depart_date,
         "return_date": c.return_date,
         "price_jpy": result.price_jpy,
+        "threshold_jpy": c.threshold_jpy,
         "source_name": result.source_name,
         "query_link": result.query_link,
         "price_mode": result.price_mode,
