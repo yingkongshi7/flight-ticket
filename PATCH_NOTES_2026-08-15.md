@@ -29,3 +29,10 @@ Travelpayouts `prices_for_dates` is cache-based and only reflects prices found r
 ## Important limitation
 
 Travelpayouts is a cached discovery API, not a live booking-price API. A route can still have no cached price even when seats are actually on sale. Alerts therefore remain an opportunity detector; final fare, baggage, stop count, taxes and availability must be checked manually.
+
+## 2026-08-16 GitHub Actions hotfix
+
+- Added `tests/__init__.py` so `tests` is an explicit importable package.
+- The workflow now runs unit tests only when `tests/test_flight_price_monitor.py` is present.
+- If the tests directory was accidentally omitted while updating GitHub, Actions emits a warning and continues to the actual monitor instead of aborting before `Decide command`.
+- Real unit-test failures still fail the job; only a missing optional test file is non-blocking.

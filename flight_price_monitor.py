@@ -370,10 +370,15 @@ class SearchCandidate:
 
     @property
     def alert_group_key(self) -> str:
+        # A route may intentionally query several airports for the same city
+        # (for example PVG/SHA, PEK/PKX, ICN/GMP).  Alerts are city/route
+        # decisions, not airport-code decisions: group all airport variants of
+        # the same configured route/date together and let
+        # select_best_alerts_by_group() keep the cheapest result.  We still
+        # keep destination in key_base so price history remains airport-specific.
         return "|".join(
             [
                 self.route_name,
-                self.destination,
                 self.depart_date,
                 self.return_date or "",
                 self.trip_type,
@@ -396,6 +401,8 @@ class SourceResult:
     stops: int | None = None
     stops_status: str = "manual_check_required"
     filtered_by_stops: bool = False
+    actual_origin_airport: str | None = None
+    actual_destination_airport: str | None = None
 
     def __post_init__(self) -> None:
         if self.original_depart_date is None:
@@ -980,6 +987,18 @@ def travelpayouts_get(
     return last_response
 
 
+def apply_travelpayouts_actual_airports(result: SourceResult, item: dict[str, Any] | None) -> None:
+    """Record the actual airports returned by Travelpayouts when available."""
+    if not isinstance(item, dict):
+        return
+    origin_airport = item.get("origin_airport")
+    destination_airport = item.get("destination_airport")
+    if isinstance(origin_airport, str) and origin_airport.strip():
+        result.actual_origin_airport = origin_airport.strip().upper()
+    if isinstance(destination_airport, str) and destination_airport.strip():
+        result.actual_destination_airport = destination_airport.strip().upper()
+
+
 def fetch_travelpayouts_price(result: SourceResult, config: dict[str, Any]) -> SourceResult:
     source_cfg = (config.get("sources") or {}).get("travelpayouts", {})
     token = os.environ.get(source_cfg.get("token_env", "TRAVELPAYOUTS_TOKEN"))
@@ -1020,7 +1039,7 @@ def fetch_travelpayouts_price(result: SourceResult, config: dict[str, Any]) -> S
     if isinstance(data, dict):
         data = list(data.values())
 
-    offers: list[tuple[int, int | None, str]] = []
+    offers: list[tuple[int, int | None, str, dict[str, Any]]] = []
     filtered_by_stops = 0
     today = dt.date.today()
     min_days = get_core_min_departure_days(config) if str(result.candidate.destination_category).startswith("Core China") else 0
@@ -1059,7 +1078,7 @@ def fetch_travelpayouts_price(result: SourceResult, config: dict[str, Any]) -> S
             continue
         total = item.get("price", item.get("value"))
         try:
-            offers.append((int(round(float(total))), stops, stops_status))
+            offers.append((int(round(float(total))), stops, stops_status, item))
         except (TypeError, ValueError):
             continue
 
@@ -1085,8 +1104,9 @@ def fetch_travelpayouts_price(result: SourceResult, config: dict[str, Any]) -> S
         result.message = "Travelpayouts returned no cached priced offers"
         return result
 
-    price, stops, stops_status = min(offers, key=lambda item: item[0])
+    price, stops, stops_status, best_item = min(offers, key=lambda item: item[0])
     result.price_jpy = price
+    apply_travelpayouts_actual_airports(result, best_item)
     result.stops = stops
     result.stops_status = stops_status
     result.status = "success"
@@ -1242,6 +1262,7 @@ def fetch_travelpayouts_flexible_price(result: SourceResult, config: dict[str, A
         return result
 
     result.price_jpy = best_price
+    apply_travelpayouts_actual_airports(result, best)
     result.stops = best_stops
     result.stops_status = best_stops_status
     if best:
@@ -1484,6 +1505,33 @@ def evaluate_price_alert(result: SourceResult, state: dict[str, Any], config: di
     }
 
 
+def legacy_destination_alert_group_key(c: SearchCandidate) -> str:
+    """Pre-v3 alert-group key retained only for state-file backward compatibility."""
+    return "|".join(
+        [
+            c.route_name,
+            c.destination,
+            c.depart_date,
+            c.return_date or "",
+            c.trip_type,
+            c.window_key,
+        ]
+    )
+
+
+def legacy_destination_cross_scope_key(c: SearchCandidate) -> str:
+    """Pre-v3 cross-scope key retained only for state-file backward compatibility."""
+    return "|".join(
+        [
+            c.route_name,
+            c.destination,
+            c.depart_date,
+            c.return_date or "",
+            c.trip_type,
+        ]
+    )
+
+
 def deduplicate_alert(alert: dict[str, Any], state: dict[str, Any], config: dict[str, Any]) -> bool:
     if not alert["alert_needed"]:
         return False
@@ -1491,12 +1539,17 @@ def deduplicate_alert(alert: dict[str, Any], state: dict[str, Any], config: dict
     settings = config.get("settings", {})
     dedup_days = int(settings.get("dedup_days", 7))
     repeat_drop_pct = float(settings.get("significant_drop_repeat_pct", 10))
-    legacy_alert = state.get("alerts", {}).get(result.key)
-    cross_scope_alert = state.get("alerts", {}).get(cross_scope_route_date_key(alert))
+    alerts_state = state.get("alerts", {})
+    legacy_alert = alerts_state.get(result.key)
+    cross_scope_alert = alerts_state.get(cross_scope_route_date_key(alert))
+    legacy_group_alert = alerts_state.get(legacy_destination_alert_group_key(result.candidate))
+    legacy_cross_scope_alert = alerts_state.get(legacy_destination_cross_scope_key(result.candidate))
     last_alert = (
-        state.get("alerts", {}).get(result.alert_key)
-        or state.get("alerts", {}).get(result.candidate.alert_group_key)
+        alerts_state.get(result.alert_key)
+        or alerts_state.get(result.candidate.alert_group_key)
         or cross_scope_alert
+        or legacy_group_alert
+        or legacy_cross_scope_alert
         or legacy_alert
     )
     if not last_alert:
@@ -1512,10 +1565,12 @@ def deduplicate_alert(alert: dict[str, Any], state: dict[str, Any], config: dict
 def cross_scope_route_date_key(alert: dict[str, Any]) -> str:
     result: SourceResult = alert["result"]
     c = result.candidate
+    # Do not include destination airport here.  A single route can search
+    # multiple airports in one metropolitan area; those should not generate
+    # duplicate messages for the same travel dates.
     return "|".join(
         [
             c.route_name,
-            c.destination,
             c.depart_date,
             c.return_date or "",
             c.trip_type,
@@ -1633,8 +1688,9 @@ def build_alert_email(alert: dict[str, Any]) -> tuple[str, str, str]:
     lines = [
         "路线信息",
         f"- 路线名称：{route_label_zh(c.route_name, c)}",
-        f"- 出发机场：{airport_label_zh(c.origin)}",
-        f"- 到达机场：{airport_label_zh(c.destination)}",
+        f"- 出发机场：{airport_label_zh(r.actual_origin_airport or c.origin)}",
+        f"- 到达机场：{airport_label_zh(r.actual_destination_airport or c.destination)}",
+        *([f"- 查询目标机场代码：{c.destination}"] if r.actual_destination_airport and r.actual_destination_airport != c.destination else []),
         f"- 出发日期：{c.depart_date}",
         f"- 返回日期：{c.return_date or '-'}",
         f"- 单程/往返：{'单程' if c.trip_type == 'oneway' else '往返'}",
@@ -2386,6 +2442,10 @@ def mark_alert_sent(state: dict[str, Any], alert: dict[str, Any]) -> None:
     alerts[result.alert_key] = alert_record
     alerts[result.candidate.alert_group_key] = alert_record
     alerts[cross_scope_route_date_key(alert)] = alert_record
+    # Also write the pre-v3 destination-specific keys so older state readers
+    # and rolling deployments continue to deduplicate correctly.
+    alerts[legacy_destination_alert_group_key(result.candidate)] = alert_record
+    alerts[legacy_destination_cross_scope_key(result.candidate)] = alert_record
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
