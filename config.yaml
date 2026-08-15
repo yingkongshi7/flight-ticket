@@ -13,6 +13,8 @@ email:
     - "tyuu7517@gmail.com"
     - "andyping1989@yahoo.co.jp"
   send_global_domestic_to_friends: true
+  # 多个收件人时不在 To 里公开朋友邮箱地址；实际收件人通过 SMTP envelope 发送。
+  hide_recipient_list: true
   friend_scopes:
     - global
     - domestic
@@ -20,12 +22,20 @@ email:
   friend_domestic_roundtrip_enabled: true
   # 朋友版国内往返阈值 = domestic_routes 里的单程阈值 x 这个倍率。
   friend_domestic_roundtrip_threshold_multiplier: 2.0
+  # 朋友版往返默认只查东京城市码 TYO（涵盖 HND/NRT），减少重复 API 请求。
+  friend_domestic_origin_codes: ["TYO"]
+  # flexible fallback 只接受较常见的短途旅行时长，避免 1 天游或超长往返误报。
+  friend_domestic_min_stay_days: 3
+  friend_domestic_max_stay_days: 8
   # 周报默认仍然只发给自己；如果也想发给朋友，改成 true。
   send_weekly_report_to_friends: false
   password_env: SMTP_PASSWORD
 
 settings:
   currency: JPY
+  # Core price API runs ignore too-soon departures by default.
+  # 3 means: on 2026-05-30, core only checks flights departing from 2026-06-02 onward.
+  core_min_departure_days: 3
   # Weekly report hides same-day departures by default.
   # 1 means: on 2026-05-30, only show flights departing from 2026-05-31 onward.
   weekly_min_departure_days: 1
@@ -38,6 +48,10 @@ settings:
     - google_flights
     - travelpayouts
     - skyscanner
+  # Fallback routes are Tokyo -> China gateway cities, not Tokyo -> Xian full itinerary.
+  # <=70,000 JPY is an alert; 70,001-84,000 JPY is a watch candidate.
+  core_fallback_alert_jpy: 70000
+  core_fallback_watch_jpy: 84000
   dedup_days: 7
   price_drop_alert_pct: 15
   significant_drop_repeat_pct: 10
@@ -72,37 +86,41 @@ core_fallback_routes:
     origin_codes: ["NRT"]
     destination_codes: ["PEK", "PKX"]
     trip_type: "roundtrip"
-    normal_threshold_jpy: 45000
-    golden_week_threshold_jpy: 75000
-    year_end_threshold_jpy: 75000
-    spring_festival_threshold_jpy: 75000
+    normal_threshold_jpy: 70000
+    watch_threshold_jpy: 84000
+    golden_week_threshold_jpy: 70000
+    year_end_threshold_jpy: 70000
+    spring_festival_threshold_jpy: 70000
   - name: "Tokyo-Xian-via-Shanghai"
     destination_category: "Core China Fallback"
     origin_codes: ["NRT"]
     destination_codes: ["PVG", "SHA"]
     trip_type: "roundtrip"
-    normal_threshold_jpy: 45000
-    golden_week_threshold_jpy: 75000
-    year_end_threshold_jpy: 75000
-    spring_festival_threshold_jpy: 75000
+    normal_threshold_jpy: 70000
+    watch_threshold_jpy: 84000
+    golden_week_threshold_jpy: 70000
+    year_end_threshold_jpy: 70000
+    spring_festival_threshold_jpy: 70000
   - name: "Tokyo-Xian-via-Guangzhou"
     destination_category: "Core China Fallback"
     origin_codes: ["NRT"]
     destination_codes: ["CAN"]
     trip_type: "roundtrip"
-    normal_threshold_jpy: 50000
-    golden_week_threshold_jpy: 80000
-    year_end_threshold_jpy: 80000
-    spring_festival_threshold_jpy: 80000
+    normal_threshold_jpy: 70000
+    watch_threshold_jpy: 84000
+    golden_week_threshold_jpy: 70000
+    year_end_threshold_jpy: 70000
+    spring_festival_threshold_jpy: 70000
   - name: "Tokyo-Xian-via-Chengdu"
     destination_category: "Core China Fallback"
     origin_codes: ["NRT"]
     destination_codes: ["TFU", "CTU"]
     trip_type: "roundtrip"
-    normal_threshold_jpy: 50000
-    golden_week_threshold_jpy: 80000
-    year_end_threshold_jpy: 80000
-    spring_festival_threshold_jpy: 80000
+    normal_threshold_jpy: 70000
+    watch_threshold_jpy: 84000
+    golden_week_threshold_jpy: 70000
+    year_end_threshold_jpy: 70000
+    spring_festival_threshold_jpy: 70000
 
 domestic_routes:
   - {name: "Tokyo-Sapporo", destination_category: "Domestic Japan", origin_codes: ["TYO", "HND", "NRT"], destination_codes: ["CTS"], trip_type: "oneway", threshold_jpy: 7200}
@@ -246,12 +264,17 @@ sources:
     token_env: TRAVELPAYOUTS_TOKEN
     currency: jpy
     market: jp
-    max_requests_per_run: 300
+    # domestic 自用单程 + 朋友往返 fallback、以及 global 全量路线都可能超过 300 次总请求。
+    # 这是“单次脚本总预算”，不是 API 每分钟限制；实际速率由 min_request_interval_seconds 控制。
+    max_requests_per_run: 800
+    min_request_interval_seconds: 0.22
     offers_limit: 5
     flexible_core_fallback: true
     flexible_global_fallback: true
     flexible_period_type: month
-    flexible_offers_limit: 10
+    flexible_offers_limit: 30
+    # 朋友国内往返精确日期无缓存时，查询该候选出发月份的往返缓存低价。
+    friend_domestic_flexible_fallback: true
     pause_every_requests: 80
     pause_seconds: 5
     retry_attempts: 3

@@ -36,6 +36,7 @@ MANUAL_ONLY_SOURCES = {"google_flights", "skyscanner", "trip_com", "ctrip", "fli
 AMADEUS_TOKEN_CACHE: dict[str, Any] = {}
 AMADEUS_REQUEST_COUNT = 0
 TRAVELPAYOUTS_REQUEST_COUNT = 0
+TRAVELPAYOUTS_LAST_REQUEST_AT = 0.0
 WEEKLY_GROUPS = [
     ("核心路线：东京-西安 / 中转备选", ["Core China", "Core China Fallback"]),
     ("中国大陆 / 港澳台低价", ["China / HK / Taiwan"]),
@@ -875,14 +876,19 @@ def travelpayouts_params(c: SearchCandidate, config: dict[str, Any]) -> dict[str
 
 
 def extract_stops_from_travelpayouts_item(item: dict[str, Any]) -> int | None:
-    for key in ("transfers", "number_of_changes", "stops", "changes"):
+    # Round-trip responses expose outbound `transfers` and `return_transfers`.
+    # Use the larger value so max_stops applies to both directions.
+    explicit_counts: list[int] = []
+    for key in ("transfers", "return_transfers", "number_of_changes", "stops", "changes"):
         value = item.get(key)
         if isinstance(value, bool):
             continue
         if isinstance(value, int):
-            return max(0, value)
-        if isinstance(value, str) and value.strip().isdigit():
-            return max(0, int(value.strip()))
+            explicit_counts.append(max(0, value))
+        elif isinstance(value, str) and value.strip().isdigit():
+            explicit_counts.append(max(0, int(value.strip())))
+    if explicit_counts:
+        return max(explicit_counts)
 
     for key in ("segments", "route"):
         value = item.get(key)
@@ -919,13 +925,14 @@ def travelpayouts_get(
     result: SourceResult,
     timeout: int = 30,
 ) -> requests.Response | None:
-    global TRAVELPAYOUTS_REQUEST_COUNT
+    global TRAVELPAYOUTS_REQUEST_COUNT, TRAVELPAYOUTS_LAST_REQUEST_AT
     source_cfg = (config.get("sources") or {}).get("travelpayouts", {})
     max_requests = int(source_cfg.get("max_requests_per_run", 300))
     attempts = int(source_cfg.get("retry_attempts", 3))
     base_sleep = float(source_cfg.get("retry_base_sleep_seconds", 2))
     pause_every = int(source_cfg.get("pause_every_requests", 80))
     pause_seconds = float(source_cfg.get("pause_seconds", 5))
+    min_interval = max(0.0, float(source_cfg.get("min_request_interval_seconds", 0.22)))
     retry_statuses = {429, 500, 502, 503, 504}
 
     last_response: requests.Response | None = None
@@ -938,7 +945,13 @@ def travelpayouts_get(
             logging.info("Pausing Travelpayouts requests for %.1fs after %d requests.", pause_seconds, TRAVELPAYOUTS_REQUEST_COUNT)
             time.sleep(pause_seconds)
 
+        if min_interval > 0 and TRAVELPAYOUTS_LAST_REQUEST_AT > 0:
+            elapsed = time.monotonic() - TRAVELPAYOUTS_LAST_REQUEST_AT
+            if elapsed < min_interval:
+                time.sleep(min_interval - elapsed)
+
         TRAVELPAYOUTS_REQUEST_COUNT += 1
+        TRAVELPAYOUTS_LAST_REQUEST_AT = time.monotonic()
         try:
             response = requests.get(
                 url,
@@ -1016,12 +1029,30 @@ def fetch_travelpayouts_price(result: SourceResult, config: dict[str, Any]) -> S
         if not isinstance(item, dict):
             continue
         depart = item.get("depart_date") or item.get("departure_at")
+        depart_date_obj: dt.date | None = None
         if depart:
             try:
-                if dt.date.fromisoformat(str(depart)[:10]) < earliest_departure:
+                depart_date_obj = dt.date.fromisoformat(str(depart)[:10])
+                if depart_date_obj < earliest_departure:
                     continue
             except ValueError:
                 continue
+
+        if is_friend_domestic_candidate(result.candidate):
+            ret = item.get("return_date") or item.get("return_at")
+            if not depart_date_obj or not ret:
+                continue
+            try:
+                return_date_obj = dt.date.fromisoformat(str(ret)[:10])
+            except ValueError:
+                continue
+            stay_days = (return_date_obj - depart_date_obj).days
+            email_cfg = config.get("email", {}) or {}
+            min_stay = int(email_cfg.get("friend_domestic_min_stay_days", 3))
+            max_stay = int(email_cfg.get("friend_domestic_max_stay_days", 8))
+            if stay_days < min_stay or stay_days > max_stay:
+                continue
+
         allowed, stops, stops_status = stops_allowed_for_item(item, config)
         if not allowed:
             filtered_by_stops += 1
@@ -1033,6 +1064,12 @@ def fetch_travelpayouts_price(result: SourceResult, config: dict[str, Any]) -> S
             continue
 
     if not offers:
+        if is_friend_domestic_candidate(result.candidate) and bool(source_cfg.get("friend_domestic_flexible_fallback", True)):
+            fallback = fetch_travelpayouts_flexible_price(result, config, token)
+            if fallback.price_jpy is not None:
+                fallback.status = "success_friend_domestic_flexible"
+                fallback.message = "Travelpayouts exact round-trip date had no offer; friend domestic monthly cached fallback returned"
+            return fallback
         if should_use_travelpayouts_core_fallback(result.candidate, config):
             fallback = fetch_travelpayouts_flexible_price(result, config, token)
             if fallback.price_jpy is not None:
@@ -1058,11 +1095,17 @@ def fetch_travelpayouts_price(result: SourceResult, config: dict[str, Any]) -> S
     return result
 
 
+def is_friend_domestic_candidate(c: SearchCandidate) -> bool:
+    return bool(c.route_config.get("_friend_domestic_roundtrip", False))
+
+
 def should_use_travelpayouts_flexible(c: SearchCandidate, config: dict[str, Any]) -> bool:
     source_cfg = (config.get("sources") or {}).get("travelpayouts", {})
     if not source_cfg.get("flexible_global_fallback", True):
         return False
-    return c.destination_category not in {"Domestic Japan", "Core China"}
+    # Core routes (including China gateway fallbacks) should try exact dates
+    # first. Domestic routes also start exact-date. Global routes use flexible.
+    return c.destination_category != "Domestic Japan" and not str(c.destination_category).startswith("Core China")
 
 
 def should_use_travelpayouts_core_fallback(c: SearchCandidate, config: dict[str, Any]) -> bool:
@@ -1074,15 +1117,27 @@ def travelpayouts_flexible_params(c: SearchCandidate, config: dict[str, Any]) ->
     source_cfg = (config.get("sources") or {}).get("travelpayouts", {})
     today = dt.date.today()
     min_days = get_core_min_departure_days(config) if str(c.destination_category).startswith("Core China") else 0
-    search_start = today + dt.timedelta(days=max(0, min_days))
+    earliest_acceptable = today + dt.timedelta(days=max(0, min_days))
+    try:
+        candidate_departure = dt.date.fromisoformat(str(c.depart_date)[:10])
+    except ValueError:
+        candidate_departure = earliest_acceptable
+
+    period_type = str(source_cfg.get("flexible_period_type", "month"))
+    # Anchor flexible searches to the candidate's departure period. Previously
+    # every +30/+45/+60/+90 global candidate queried the current month.
+    search_anchor = max(candidate_departure, earliest_acceptable)
+    if period_type == "year":
+        beginning_of_period = f"{search_anchor.year:04d}"
+    else:
+        beginning_of_period = search_anchor.replace(day=1).isoformat()
+
     params: dict[str, Any] = {
         "origin": c.origin,
         "destination": c.destination,
         "currency": source_cfg.get("currency", "jpy"),
-        # Start from the effective earliest acceptable date. For core routes this
-        # avoids same-day/tomorrow cached fares that are not actionable.
-        "beginning_of_period": search_start.isoformat(),
-        "period_type": source_cfg.get("flexible_period_type", "month"),
+        "beginning_of_period": beginning_of_period,
+        "period_type": period_type,
         "group_by": "dates",
         "one_way": "true" if c.trip_type == "oneway" else "false",
         "sorting": "price",
@@ -1137,12 +1192,30 @@ def fetch_travelpayouts_flexible_price(result: SourceResult, config: dict[str, A
         if not isinstance(item, dict):
             continue
         depart = item.get("depart_date") or item.get("departure_at")
+        depart_date_obj: dt.date | None = None
         if depart:
             try:
-                if dt.date.fromisoformat(str(depart)[:10]) < earliest_departure:
+                depart_date_obj = dt.date.fromisoformat(str(depart)[:10])
+                if depart_date_obj < earliest_departure:
                     continue
             except ValueError:
                 continue
+
+        if is_friend_domestic_candidate(result.candidate):
+            ret = item.get("return_date") or item.get("return_at")
+            if not depart_date_obj or not ret:
+                continue
+            try:
+                return_date_obj = dt.date.fromisoformat(str(ret)[:10])
+            except ValueError:
+                continue
+            stay_days = (return_date_obj - depart_date_obj).days
+            email_cfg = config.get("email", {}) or {}
+            min_stay = int(email_cfg.get("friend_domestic_min_stay_days", 3))
+            max_stay = int(email_cfg.get("friend_domestic_max_stay_days", 8))
+            if stay_days < min_stay or stay_days > max_stay:
+                continue
+
         allowed, stops, stops_status = stops_allowed_for_item(item, config)
         if not allowed:
             filtered_by_stops += 1
@@ -1944,16 +2017,23 @@ def friend_domestic_roundtrip_enabled(config: dict[str, Any]) -> bool:
 def generate_friend_domestic_candidate_searches(config: dict[str, Any]) -> list[SearchCandidate]:
     """Generate separate Japan domestic round-trip candidates for friends.
 
-    The user's normal domestic_routes stay unchanged, so the user can keep
-    receiving one-way domestic alerts. Friends receive these generated
-    round-trip variants instead.
+    The user's normal domestic_routes stay unchanged. Friends receive generated
+    round-trip candidates. By default only TYO is queried because it represents
+    all Tokyo airports and avoids three near-duplicate TYO/HND/NRT API calls.
     """
     email_cfg = config.get("email", {}) or {}
     multiplier = float(email_cfg.get("friend_domestic_roundtrip_threshold_multiplier", 2.0))
+    friend_origins = email_cfg.get("friend_domestic_origin_codes", ["TYO"])
+    if isinstance(friend_origins, str):
+        friend_origins = [friend_origins]
+    friend_origins = [str(x) for x in friend_origins if str(x) in ALLOWED_TOKYO_ORIGINS] or ["TYO"]
+
     friend_routes: list[dict[str, Any]] = []
     for route in config.get("domestic_routes", []) or []:
         friend_route = dict(route)
         friend_route["trip_type"] = "roundtrip"
+        friend_route["origin_codes"] = friend_origins
+        friend_route["_friend_domestic_roundtrip"] = True
         for key in ("threshold_jpy", "normal_threshold_jpy", "very_cheap_jpy", "abnormal_jpy"):
             if key in friend_route and friend_route[key] is not None:
                 friend_route[key] = int(round(float(friend_route[key]) * multiplier))
@@ -2017,7 +2097,13 @@ def send_email(
     msg = EmailMessage()
     msg["Subject"] = subject
     msg["From"] = email_cfg["from"]
-    msg["To"] = ", ".join(recipients)
+    if bool(email_cfg.get("hide_recipient_list", True)) and len(recipients) > 1:
+        # Keep friends' addresses private from one another. SMTP envelope
+        # recipients are passed explicitly below, so the visible To header can
+        # safely show only the sender address.
+        msg["To"] = email_cfg["from"]
+    else:
+        msg["To"] = ", ".join(recipients)
     msg.set_content(text_body)
     if html_body:
         msg.add_alternative(html_body, subtype="html")
@@ -2026,7 +2112,7 @@ def send_email(
         if smtp_cfg.get("use_tls", True):
             server.starttls()
         server.login(smtp_cfg.get("username", email_cfg["from"]), password)
-        server.send_message(msg)
+        server.send_message(msg, to_addrs=recipients)
 
 
 def run_scope(args: argparse.Namespace) -> str:
@@ -2420,6 +2506,18 @@ def main() -> int:
         config,
         link_only=args.link_only,
     )
+    if friend_candidates:
+        friend_priced = sum(1 for r in friend_source_results if r.price_jpy is not None)
+        friend_tp_no_price = sum(1 for r in friend_source_results if r.source_name == "travelpayouts" and r.status == "no_price")
+        friend_tp_fallback = sum(1 for r in friend_source_results if r.status == "success_friend_domestic_flexible")
+        summary += (
+            "\n\n### Friend domestic round-trip diagnostics"
+            f"\n- Friend candidates: `{len(friend_candidates)}`"
+            f"\n- Friend priced results: `{friend_priced}`"
+            f"\n- Friend Travelpayouts no-price results: `{friend_tp_no_price}`"
+            f"\n- Friend monthly-fallback successes: `{friend_tp_fallback}`"
+            f"\n- Friend alert emails prepared: `{len(friend_alerts_to_send)}`"
+        )
     logging.info("\n%s", summary)
     publish_github_step_summary(summary)
 
@@ -2436,6 +2534,7 @@ def main() -> int:
         else:
             send_email(config, subject, text_body, html_body, to=self_recipients)
             mark_alert_sent(state, alert)
+            save_state(state, args.state)
 
     for alert in friend_alerts_to_send:
         subject, text_body, html_body = build_alert_email(alert)
@@ -2447,6 +2546,7 @@ def main() -> int:
         else:
             send_email(config, subject, text_body, html_body, to=friends)
             mark_alert_sent(state, alert)
+            save_state(state, args.state)
 
     if dry_run:
         logging.info("Dry run: state not saved.")

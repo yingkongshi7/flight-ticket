@@ -45,7 +45,8 @@ Google Flights / Trip.com / 携程 / 飞猪 / Skyscanner 等人工确认链接�
 ```yaml
 sources:
   travelpayouts:
-    max_requests_per_run: 300
+    max_requests_per_run: 800
+    min_request_interval_seconds: 0.22
     pause_every_requests: 80
     pause_seconds: 5
     retry_attempts: 3
@@ -54,18 +55,22 @@ sources:
 
 大致候选数量：
 
-- `core-only`: 48
-- `domestic-only`: 144
-- `global-only`: 352
-- `all`: 544
+按 2026-08-15 当前配置，大致候选数量：
 
-建议日常分开运行，不建议把 `all` 作为每天自动任务。
+- `core-only`: 100
+- `domestic-only` 自己单程: 144
+- `domestic-only` 朋友往返: 48（默认只查 `TYO`）
+- `global-only`: 348
+- `all`: 592（`all` 不额外生成朋友往返）
+
+日常仍建议按 core / global / domestic 分开运行。`max_requests_per_run` 是单次脚本总预算；实际请求速度由 `min_request_interval_seconds` 控制。
 
 价格模式：
 
-- `domestic`：使用 Travelpayouts `prices_for_dates`，精确日期缓存报价。
+- `domestic`（自己）：使用 Travelpayouts `prices_for_dates`，精确日期缓存报价。
+- `domestic`（朋友）：先查精确往返日期；如果缓存为空，再查询对应候选出发月份的 `get_latest_prices` 往返缓存价，并只接受 3–8 天停留。
 - `core`：先用 `prices_for_dates` 查精确日期；没有报价时 fallback 到 `get_latest_prices` flexible cached low-price。
-- `global`：使用 `get_latest_prices` flexible cached latest price，适合发现低价机会，不代表精确日期实时价格。
+- `global`：使用 `get_latest_prices` flexible cached latest price，并按每个候选的出发月份查询；适合发现低价机会，不代表实时最终票价。
 - `manual`：人工确认链接。
 
 ## 提醒规则
@@ -97,7 +102,7 @@ settings:
 
 如果 `Priced results > 0` 但 `Alert emails prepared = 0`，通常说明价格未达到目标价、观察价阈值或降价规则，或者被重复提醒控制抑制。
 
-如果出现 `rate_limited`，建议降低 `max_requests_per_run`、增大 `pause_seconds`，或继续分批运行。
+如果出现 `rate_limited`，优先增大 `min_request_interval_seconds` 或 `pause_seconds`。脚本当前会限速，避免 global 全量查询在一分钟内过快请求。
 
 ## GitHub Secrets
 
@@ -118,6 +123,7 @@ settings:
 - `23:00 UTC` = 日本时间次日 `08:00`，每天运行核心路线。
 - `23:30 UTC` = 日本时间次日 `08:30`，每天运行全球路线。
 - `00:00 UTC Saturday` = 日本时间周六 `09:00`，发送周报。
+- `00:15 UTC Saturday` = 日本时间周六 `09:15`，发送东京-西安人工确认链接。
 - `00:30 UTC Saturday` = 日本时间周六 `09:30`，每周运行日本国内路线。
 
 手动测试同一天重复运行：
@@ -164,6 +170,21 @@ $env:TRAVELPAYOUTS_TOKEN="your_token"
 0 9 * * 6 cd /path/to/repo && /usr/bin/python3 flight_price_monitor.py --config flight_price_config.yaml --weekly-report
 30 9 * * 6 cd /path/to/repo && /usr/bin/python3 flight_price_monitor.py --config flight_price_config.yaml --domestic-only
 ```
+
+## 朋友国内线的发送逻辑
+
+朋友国内线只在价格达到提醒规则时发送，不会每周固定发送“没有低价”的邮件。当前规则仍然是：往返目标价 = 国内单程阈值 × 2，观察价再按全局 `watch_price_margin_pct` 放宽。
+
+2026-08-15 的历史 state 显示，当天朋友版 144 个旧版精确往返查询全部是 `no_price`，而自己的单程仍有有效价格。这说明主要问题是精确往返缓存命中率，而不是朋友邮箱配置。修正版默认只用 `TYO` 生成 48 个朋友候选，并在精确往返无缓存时按候选月份 fallback。GitHub Step Summary 里会额外显示 `Friend domestic round-trip diagnostics`，方便确认朋友版到底抓到了多少价格、准备了多少提醒。
+
+## 其他可靠性修正
+
+- Global flexible 查询现在按候选出发月份，而不是所有候选重复查询当前月。
+- Travelpayouts 单次请求预算提高到 800，并增加请求间隔；正常分拆任务不会因 300 次总预算而截断后半段路线。
+- 往返票转机过滤同时检查 `transfers` 和 `return_transfers`，避免去程合规但返程超过最大转机次数。
+- 多个朋友收件人默认隐藏彼此邮箱地址。
+- 每封成功发送的提醒会立即写入本地 state；GitHub Actions 的 state commit 使用 `always()`，降低中途 SMTP 失败后重复发送已成功邮件的风险。
+- GitHub Actions 会先运行 `tests/` 下的离线单元测试。
 
 ## 限制
 
